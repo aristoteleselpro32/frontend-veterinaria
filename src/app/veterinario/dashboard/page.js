@@ -6,8 +6,18 @@ import Cartilla from "./cartilla";
 import Solicitudes from "./solicitudes";
 import PerfilMascota from "./perfilmascota";
 import ServiciosMascota from "./ServiciosMascota";
-import LlamadasEmergencia from "./LlamadasEmergencia"; // Nuevo componente
-import { Container, Nav, Dropdown, Image, Button, Modal, Alert, Spinner, Form } from "react-bootstrap";
+import LlamadasEmergencia from "./LlamadasEmergencia";
+import {
+  Container,
+  Nav,
+  Dropdown,
+  Image,
+  Button,
+  Modal,
+  Alert,
+  Spinner,
+  Form,
+} from "react-bootstrap";
 import { FaBell, FaUserCircle, FaPhone, FaPhoneSlash } from "react-icons/fa";
 import Cookies from "js-cookie";
 import { io } from "socket.io-client";
@@ -26,8 +36,8 @@ export default function VeterinarioDashboard() {
   const [callerInfo, setCallerInfo] = useState(null);
   const [showCallModal, setShowCallModal] = useState(false);
   const [waitingForOffer, setWaitingForOffer] = useState(false);
-  const [showEndCallModal, setShowEndCallModal] = useState(false); // Modal para finalizar llamada
-  const [endCallForm, setEndCallForm] = useState({ precio: "", motivo: "emergencia" }); // Formulario para precio y motivo
+  const [showEndCallModal, setShowEndCallModal] = useState(false);
+  const [endCallForm, setEndCallForm] = useState({ precio: "", motivo: "emergencia" });
 
   // Refs para WebRTC
   const socketRef = useRef(null);
@@ -45,15 +55,12 @@ export default function VeterinarioDashboard() {
       { urls: "stun:stun2.l.google.com:19302" },
       { urls: "stun:stun.relay.metered.ca:80" },
       {
-        urls: [
-          "turn:openrelay.metered.ca:80",
-          "turn:openrelay.metered.ca:443", // Puerto seguro
-        ],
+        urls: ["turn:openrelay.metered.ca:80", "turn:openrelay.metered.ca:443"],
         username: "openrelayproject",
         credential: "openrelayproject",
       },
       {
-        urls: "turn:turn.relay.metered.ca:443", // Servidor TURN adicional
+        urls: "turn:turn.relay.metered.ca:443",
         username: "openrelayproject",
         credential: "openrelayproject",
       },
@@ -136,33 +143,35 @@ export default function VeterinarioDashboard() {
   }, [user]);
 
   // Asigna streams a videos y activa audio
-useEffect(() => {
-  const playVideo = async (videoRef, stream) => {
-    if (videoRef.current && stream && stream.getTracks().length > 0) {
-      videoRef.current.srcObject = stream;
-      const playPromise = videoRef.current.play();
-      if (playPromise !== undefined) {
-        playPromise
-          .then(() => {
-            console.log("Reproducción iniciada correctamente:", stream.getTracks().map((t) => t.kind));
-          })
-          .catch((error) => {
-            console.error("Error al reproducir video:", error);
-            if (error.name === "AbortError") {
-              setTimeout(() => playVideo(videoRef, stream), 500); // Reintento después de 500ms
-            }
-          });
+  useEffect(() => {
+    const playVideo = async (videoRef, stream) => {
+      if (videoRef.current && stream && stream.getTracks().length > 0) {
+        if (!videoRef.current.srcObject) {
+          videoRef.current.srcObject = stream;
+        }
+        const playPromise = videoRef.current.play();
+        if (playPromise !== undefined) {
+          playPromise
+            .then(() => {
+              console.log("Reproducción iniciada correctamente:", stream.getTracks().map((t) => t.kind));
+            })
+            .catch((error) => {
+              console.error("Error al reproducir video:", error);
+              if (error.name === "AbortError") {
+                setTimeout(() => playVideo(videoRef, stream), 500); // Reintento después de 500ms
+              }
+            });
+        }
       }
-    }
-  };
+    };
 
-  if (callAccepted && localVideoRef.current && localStreamRef.current) {
-    playVideo(localVideoRef, localStreamRef.current);
-  }
-  if (callAccepted && remoteVideoRef.current && remoteStreamRef.current) {
-    playVideo(remoteVideoRef, remoteStreamRef.current);
-  }
-}, [callAccepted]);
+    if (callAccepted && localVideoRef.current && localStreamRef.current) {
+      playVideo(localVideoRef, localStreamRef.current);
+    }
+    if (callAccepted && remoteVideoRef.current && remoteStreamRef.current) {
+      playVideo(remoteVideoRef, remoteStreamRef.current);
+    }
+  }, [callAccepted]);
 
   // Limpieza adicional al desmontar
   useEffect(() => {
@@ -215,18 +224,42 @@ useEffect(() => {
       };
 
       pc.ontrack = (event) => {
-        if (!remoteStreamRef.current) {
-          remoteStreamRef.current = new MediaStream();
-        }
-        event.streams[0].getTracks().forEach((track) => {
-          console.log("Añadiendo track remoto:", track.kind);
-          if (!remoteStreamRef.current.getTracks().some((t) => t.id === track.id)) {
-            remoteStreamRef.current.addTrack(track);
-            if (track.kind === "audio" && remoteVideoRef.current) {
-              remoteVideoRef.current.play().catch((e) => console.error("Error al reproducir audio:", e));
+        if (event.streams && event.streams[0]) {
+          if (!remoteStreamRef.current) {
+            remoteStreamRef.current = new MediaStream();
+            if (remoteVideoRef.current && !remoteVideoRef.current.srcObject) {
+              remoteVideoRef.current.srcObject = remoteStreamRef.current;
+              remoteVideoRef.current
+                .play()
+                .catch((e) =>
+                  console.error("Error inicial al reproducir video remoto:", e)
+                );
             }
           }
-        });
+          event.streams[0].getTracks().forEach((track) => {
+            console.log("Añadiendo track remoto:", track.kind);
+            if (!remoteStreamRef.current.getTracks().some((t) => t.id === track.id)) {
+              remoteStreamRef.current.addTrack(track);
+              if (remoteVideoRef.current && track.kind === "audio") {
+                remoteVideoRef.current
+                  .play()
+                  .catch((e) => console.error("Error al reproducir audio:", e));
+              }
+            }
+          });
+        }
+      };
+
+      pc.oniceconnectionstatechange = () => {
+        console.log("ICE connection state:", pc.iceConnectionState);
+        if (pc.iceConnectionState === "disconnected" || pc.iceConnectionState === "failed") {
+          setCallStatus("error");
+          socketRef.current.emit("finalizar_llamada", {
+            veterinarioId: user.id || user._id,
+            usuarioId: from,
+          });
+          finalizarLlamada();
+        }
       };
 
       localStream.getTracks().forEach((track) => {
@@ -353,13 +386,8 @@ useEffect(() => {
       remoteStreamRef.current = null;
     }
 
-    if (localVideoRef.current) {
-      localVideoRef.current.srcObject = null;
-    }
-
-    if (remoteVideoRef.current) {
-      remoteVideoRef.current.srcObject = null;
-    }
+    if (localVideoRef.current) localVideoRef.current.srcObject = null;
+    if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
 
     setCallAccepted(false);
     setIncomingCall(null);
