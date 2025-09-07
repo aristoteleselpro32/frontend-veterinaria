@@ -23,7 +23,7 @@ import AOS from "aos";
 import "aos/dist/aos.css";
 
 // Incluir adapter.js para compatibilidad WebRTC
-import adapter from 'webrtc-adapter';
+
 
 // ID para usuarios invitados en llamadas de emergencia
 const EMERGENCY_USER_ID = "750b4f1d-3912-4802-8df2-e6544ba860fd";
