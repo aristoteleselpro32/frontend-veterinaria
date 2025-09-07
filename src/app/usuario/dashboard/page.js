@@ -1,7 +1,7 @@
 "use client";
 import React from "react";
 import { useEffect, useState } from "react";
-import { getLocalStorage } from "@/utils/storage";
+
 import {
   Container,
   Row,
