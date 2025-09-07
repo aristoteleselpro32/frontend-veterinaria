@@ -462,7 +462,7 @@ export default function Home() {
   const askAndLoadCameras = async () => {
     try {
       setLoadingDevices(true);
-      const tmp = await navigator.mediaDevices.getUserMedia({ video: true, audio: false }).catch(() => null);
+      const tmp = await navigator.mediaDevices.getUserMedia({ video: true, audio: true }).catch(() => null);
       const devices = await navigator.mediaDevices.enumerateDevices();
       const videoInputs = devices.filter((d) => d.kind === "videoinput");
       setCameras(videoInputs);
