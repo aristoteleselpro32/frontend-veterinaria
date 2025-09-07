@@ -25,11 +25,10 @@ import "aos/dist/aos.css";
 // ID para usuarios invitados en llamadas de emergencia
 const EMERGENCY_USER_ID = "750b4f1d-3912-4802-8df2-e6544ba860fd";
 
-// Configuración ICE para WebRTC con Xirsys
-// CONFIGURACIÓN CORREGIDA
+// Configuración ICE mejorada
 const RTC_CONFIG = {
   iceServers: [
-    // Servidores STUN públicos de Google (funcionan mejor)
+    // Servidores STUN públicos de Google
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
     { urls: "stun:stun2.l.google.com:19302" },
@@ -53,7 +52,7 @@ const RTC_CONFIG = {
       credential: "openrelayproject"
     }
   ],
-  iceTransportPolicy: "all", // Intenta ambos: relay y host
+  iceTransportPolicy: "all",
   bundlePolicy: "max-bundle",
   rtcpMuxPolicy: "require"
 };
@@ -155,7 +154,7 @@ const styles = `
       max-width: 100%;
     }
     .dropdown-menu {
-      min-width: 100% !important;
+      minimal-width: 100% !important;
     }
   }
 
@@ -380,9 +379,14 @@ export default function Home() {
 
   // Conexión Socket.IO y manejo de eventos WebRTC
   useEffect(() => {
+    if (!user) return;
+
     const s = io("https://rtc-service.onrender.com", {
-      transports: ["websocket"],
+      transports: ["websocket", "polling"],
       autoConnect: true,
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
     });
     setSocket(s);
 
@@ -413,8 +417,11 @@ export default function Home() {
     s.on("webrtc_ice_candidate", async (payload) => {
       if (!pcRef.current || !payload.candidate) return;
       try {
-        await pcRef.current.addIceCandidate(new RTCIceCandidate(payload.candidate));
-        console.log("✅ ICE candidate añadido:", payload.candidate);
+        // FILTRO CRÍTICO: Evitar candidatos vacíos
+        if (payload.candidate && payload.candidate.candidate !== "") {
+          await pcRef.current.addIceCandidate(new RTCIceCandidate(payload.candidate));
+          console.log("✅ ICE candidate añadido:", payload.candidate);
+        }
       } catch (err) {
         console.error("❌ Error addIceCandidate:", err);
       }
@@ -718,6 +725,7 @@ export default function Home() {
 
     let retryCount = 0;
     const maxRetries = 3;
+    let iceTimeout;
 
     const attemptConnection = async () => {
       try {
@@ -726,11 +734,17 @@ export default function Home() {
 
         const constraints = {
           video: {
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
+            width: { ideal: 640 },
+            height: { ideal: 480 },
+            frameRate: { ideal: 24 },
             ...(selectedCameraId ? { deviceId: { exact: selectedCameraId } } : { facingMode: "user" }),
           },
-          audio: true,
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            sampleRate: 44100,
+            channelCount: 1
+          },
         };
 
         const stream = await navigator.mediaDevices.getUserMedia(constraints).catch((err) => {
@@ -759,72 +773,104 @@ export default function Home() {
 
         // Manejo mejorado de tracks remotos
         pc.ontrack = (event) => {
-  console.log("📹 Track remoto recibido:", event.track.kind);
-  
-  if (event.streams && event.streams[0]) {
-    const incomingStream = event.streams[0];
-    
-    if (remoteStreamRef.current) {
-      remoteStreamRef.current.getTracks().forEach(track => track.stop());
-    }
-    
-    remoteStreamRef.current = incomingStream;
-    
-    setTimeout(() => {
-      if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = null;
-        remoteVideoRef.current.srcObject = incomingStream;
-        
-        // SOLUCIÓN: Silenciar completamente el error AbortError
-        remoteVideoRef.current.play().catch(error => {
-          if (error.name !== 'AbortError') {
-            console.warn("Error al reproducir:", error);
+          console.log("📹 Track remoto recibido:", event.track.kind);
+          
+          if (event.streams && event.streams[0]) {
+            const incomingStream = event.streams[0];
+            
+            // Limpiar tracks antiguos primero
+            if (remoteStreamRef.current) {
+              remoteStreamRef.current.getTracks().forEach(track => track.stop());
+            }
+            
+            remoteStreamRef.current = incomingStream;
+            
+            // Reproducir después de un pequeño delay para evitar conflictos
+            setTimeout(() => {
+              if (remoteVideoRef.current) {
+                remoteVideoRef.current.srcObject = null;
+                remoteVideoRef.current.srcObject = incomingStream;
+                
+                safePlay(remoteVideoRef.current).then(() => {
+                  console.log("✅ Video remoto reproduciéndose");
+                }).catch(error => {
+                  if (error.name !== 'AbortError') {
+                    console.error("Error al reproducir video remoto:", error);
+                  }
+                });
+              }
+            }, 500);
           }
-        });
-      }
-    }, 100);
-  }
-};
+        };
 
+        // FILTRO CRÍTICO PARA ICE CANDIDATES VACÍOS
         pc.onicecandidate = (event) => {
-          if (event.candidate) {
+          if (event.candidate && event.candidate.candidate !== "") {
             console.log("Enviando ICE candidate:", event.candidate);
             socket.emit("webrtc_ice_candidate", {
               to: selectedVetForCall,
               from: user?.id || user?._id || user?.id_cliente || EMERGENCY_USER_ID,
               candidate: event.candidate,
             });
+          } else {
+            console.log("ICE candidate vacío, ignorando...");
           }
         };
 
+        // MANEJO MEJORADO DE CONEXIÓN ICE
         pc.oniceconnectionstatechange = () => {
           console.log("ICE connection state:", pc.iceConnectionState);
-          if (pc.iceConnectionState === "disconnected" && retryCount < maxRetries) {
+          
+          if (pc.iceConnectionState === "connected") {
+            setCallStatus("en_llamada");
+            if (iceTimeout) clearTimeout(iceTimeout);
+          }
+          else if (pc.iceConnectionState === "disconnected" && retryCount < maxRetries) {
             console.log(`Reintentando conexión (${retryCount + 1}/${maxRetries})...`);
             retryCount++;
             setCallStatus("reconectando");
+            
             setTimeout(() => {
               if (pcRef.current) {
-                pcRef.current.restartIce();
+                try {
+                  pcRef.current.restartIce();
+                } catch (e) {
+                  console.error("Error al reiniciar ICE:", e);
+                }
               }
-            }, 1000);
-          } else if (pc.iceConnectionState === "disconnected" || pc.iceConnectionState === "failed") {
-            console.log("❌ Conexión ICE fallida después de reintentos");
+            }, 2000);
+          }
+          else if (pc.iceConnectionState === "failed" || pc.iceConnectionState === "disconnected") {
+            console.log("❌ Conexión ICE fallida");
+            setCallStatus("error");
+            if (iceTimeout) clearTimeout(iceTimeout);
+            
+            socket.emit("finalizar_llamada", {
+              usuarioId: user?.id || user?._id || user?.id_cliente || EMERGENCY_USER_ID,
+              veterinarioId: selectedVetForCall,
+            });
+            finalizarLlamada(false);
+          }
+        };
+
+        // Timeout para conexión ICE (25 segundos)
+        iceTimeout = setTimeout(() => {
+          if (pc.iceConnectionState !== "connected" && pc.iceConnectionState !== "completed") {
+            console.log("❌ Timeout de conexión ICE");
             setCallStatus("error");
             socket.emit("finalizar_llamada", {
               usuarioId: user?.id || user?._id || user?.id_cliente || EMERGENCY_USER_ID,
               veterinarioId: selectedVetForCall,
             });
             finalizarLlamada(false);
-          } else if (pc.iceConnectionState === "connected") {
-            setCallStatus("en_llamada");
           }
-        };
+        }, 25000);
 
         const offer = await pc.createOffer({
           offerToReceiveAudio: true,
           offerToReceiveVideo: true,
         });
+        
         await pc.setLocalDescription(offer);
 
         socket.emit("iniciar_llamada", {
@@ -1410,7 +1456,7 @@ export default function Home() {
                 </Form.Group>
               </Col>
               <Col md={6} xs={12}>
-                <Form.Group className="mb-2">
+                 <Form.Group className="mb-2">
                   <Form.Label>Fecha</Form.Label>
                   <Form.Control
                     type="date"

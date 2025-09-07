@@ -66,38 +66,37 @@ export default function VeterinarioDashboard() {
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
 
-  // Configuración ICE con Xirsys
-// CONFIGURACIÓN CORREGIDA
-const RTC_CONFIG = {
-  iceServers: [
-    // Servidores STUN públicos de Google (funcionan mejor)
-    { urls: "stun:stun.l.google.com:19302" },
-    { urls: "stun:stun1.l.google.com:19302" },
-    { urls: "stun:stun2.l.google.com:19302" },
-    { urls: "stun:stun3.l.google.com:19302" },
-    { urls: "stun:stun4.l.google.com:19302" },
-    
-    // Servidores TURN alternativos (gratuitos)
-    { 
-      urls: "turn:openrelay.metered.ca:80",
-      username: "openrelayproject",
-      credential: "openrelayproject"
-    },
-    { 
-      urls: "turn:openrelay.metered.ca:443",
-      username: "openrelayproject", 
-      credential: "openrelayproject"
-    },
-    { 
-      urls: "turn:openrelay.metered.ca:443?transport=tcp",
-      username: "openrelayproject",
-      credential: "openrelayproject"
-    }
-  ],
-  iceTransportPolicy: "all", // Intenta ambos: relay y host
-  bundlePolicy: "max-bundle",
-  rtcpMuxPolicy: "require"
-};
+  // Configuración ICE mejorada
+  const RTC_CONFIG = {
+    iceServers: [
+      // Servidores STUN públicos de Google
+      { urls: "stun:stun.l.google.com:19302" },
+      { urls: "stun:stun1.l.google.com:19302" },
+      { urls: "stun:stun2.l.google.com:19302" },
+      { urls: "stun:stun3.l.google.com:19302" },
+      { urls: "stun:stun4.l.google.com:19302" },
+      
+      // Servidores TURN alternativos (gratuitos)
+      { 
+        urls: "turn:openrelay.metered.ca:80",
+        username: "openrelayproject",
+        credential: "openrelayproject"
+      },
+      { 
+        urls: "turn:openrelay.metered.ca:443",
+        username: "openrelayproject", 
+        credential: "openrelayproject"
+      },
+      { 
+        urls: "turn:openrelay.metered.ca:443?transport=tcp",
+        username: "openrelayproject",
+        credential: "openrelayproject"
+      }
+    ],
+    iceTransportPolicy: "all",
+    bundlePolicy: "max-bundle",
+    rtcpMuxPolicy: "require"
+  };
 
   // Cargar usuario al montar
   useEffect(() => {
@@ -112,13 +111,16 @@ const RTC_CONFIG = {
     }
   }, []);
 
-  // Conexión Socket.IO y manejo de llamadas
+  // Conexión Socket.IO y manejo de llamadas - MEJORADA
   useEffect(() => {
     if (!user) return;
 
     const socket = io("https://rtc-service.onrender.com", {
-      transports: ["websocket"],
+      transports: ["websocket", "polling"],
       autoConnect: true,
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
     });
     socketRef.current = socket;
 
@@ -154,8 +156,9 @@ const RTC_CONFIG = {
       }
     });
 
+    // FILTRO PARA ICE CANDIDATES VACÍOS
     socket.on("webrtc_ice_candidate", ({ from, candidate }) => {
-      if (pcRef.current && candidate && incomingCall?.from === from) {
+      if (pcRef.current && candidate && candidate.candidate !== "" && incomingCall?.from === from) {
         pcRef.current
           .addIceCandidate(new RTCIceCandidate(candidate))
           .catch((err) => console.error("Error al agregar ICE candidate:", err));
@@ -166,6 +169,14 @@ const RTC_CONFIG = {
       console.log("📞 Llamada finalizada por el cliente");
       setShowEndCallModal(false);
       finalizarLlamada();
+    });
+
+    socket.on("disconnect", () => {
+      console.log("🔌 Socket desconectado");
+    });
+
+    socket.on("error", (error) => {
+      console.error("❌ Error de socket:", error);
     });
 
     return () => {
@@ -210,19 +221,26 @@ const RTC_CONFIG = {
     };
   }, []);
 
-  // Manejar llamada WebRTC entrante
+  // Manejar llamada WebRTC entrante - CORREGIDA
   const handleIncomingWebRTCCall = async (from, offerSdp) => {
     let retryCount = 0;
     const maxRetries = 3;
+    let iceTimeout;
 
     try {
       setCallStatus("connecting");
 
       const constraints = {
-        audio: true,
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          sampleRate: 44100,
+          channelCount: 1
+        },
         video: {
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+          frameRate: { ideal: 24 },
           facingMode: "user",
         },
       };
@@ -245,8 +263,9 @@ const RTC_CONFIG = {
       const pc = new RTCPeerConnection(RTC_CONFIG);
       pcRef.current = pc;
 
+      // FILTRO PARA ICE CANDIDATES VACÍOS
       pc.onicecandidate = (event) => {
-        if (event.candidate) {
+        if (event.candidate && event.candidate.candidate !== "") {
           socketRef.current.emit("webrtc_ice_candidate", {
             to: from,
             from: user.id || user._id,
@@ -255,7 +274,7 @@ const RTC_CONFIG = {
         }
       };
 
-      // Manejo mejorado de tracks remotos
+      // MANEJO MEJORADO DE TRACKS REMOTOS (SIN .CATCH PROBLEMÁTICO)
       pc.ontrack = (event) => {
         console.log("📹 Track remoto recibido:", event.track.kind);
         
@@ -275,37 +294,51 @@ const RTC_CONFIG = {
               remoteVideoRef.current.srcObject = null;
               remoteVideoRef.current.srcObject = incomingStream;
               
-              const playPromise = remoteVideoRef.current.play();
-              if (playPromise !== undefined) {
-                playPromise
-                  .then(() => {
-                    console.log("✅ Video remoto reproduciéndose");
-                  })
-                  .catch(error => {
-                    console.warn("⚠️ Error en play promise:", error);
-                    // Silenciar el error de AbortError ya que es común en WebRTC
-                    if (error.name !== 'AbortError') {
-                      console.error("Error al reproducir video remoto:", error);
-                    }
-                  });
-              }
+              // USAR safePlay EN LUGAR DE .catch MANUAL
+              safePlay(remoteVideoRef.current).then(() => {
+                console.log("✅ Video remoto reproduciéndose");
+              });
             }
           }, 100);
         }
       };
 
+      // TIMEOUT PARA CONEXIÓN ICE (25 segundos)
+      iceTimeout = setTimeout(() => {
+        if (pc.iceConnectionState !== "connected" && pc.iceConnectionState !== "completed") {
+          console.log("❌ Timeout de conexión ICE");
+          setCallStatus("error");
+          finalizarLlamada();
+        }
+      }, 25000);
+
       pc.oniceconnectionstatechange = () => {
         console.log("ICE connection state:", pc.iceConnectionState);
-        if (pc.iceConnectionState === "disconnected" && retryCount < maxRetries) {
+        
+        if (pc.iceConnectionState === "connected") {
+          setCallStatus("connected");
+          if (iceTimeout) clearTimeout(iceTimeout);
+        }
+        else if (pc.iceConnectionState === "disconnected" && retryCount < maxRetries) {
           console.log(`Reintentando conexión (${retryCount + 1}/${maxRetries})...`);
           retryCount++;
+          setCallStatus("reconectando");
+          
           setTimeout(() => {
             if (pcRef.current) {
-              pcRef.current.restartIce();
+              try {
+                pcRef.current.restartIce();
+              } catch (e) {
+                console.error("Error al reiniciar ICE:", e);
+              }
             }
-          }, 1000);
-        } else if (pc.iceConnectionState === "disconnected" || pc.iceConnectionState === "failed") {
+          }, 2000);
+        }
+        else if (pc.iceConnectionState === "failed" || pc.iceConnectionState === "disconnected") {
+          console.log("❌ Conexión ICE fallida");
           setCallStatus("error");
+          if (iceTimeout) clearTimeout(iceTimeout);
+          
           socketRef.current.emit("finalizar_llamada", {
             veterinarioId: user.id || user._id,
             usuarioId: from,
@@ -732,7 +765,7 @@ const RTC_CONFIG = {
           >
             <h6
               style={{
-                position: "absolute",
+                                position: "absolute",
                 top: "10px",
                 left: "10px",
                 color: "white",
