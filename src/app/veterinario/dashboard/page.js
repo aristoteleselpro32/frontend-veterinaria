@@ -67,23 +67,37 @@ export default function VeterinarioDashboard() {
   const remoteVideoRef = useRef(null);
 
   // Configuración ICE con Xirsys
-  const RTC_CONFIG = {
-    iceServers: [
-      { urls: "stun:sp-turn1.xirsys.com" },
-      {
-        username: "_ee0X7Re6b3R-6JqKAJWd320SZoudP--4k4h7Bh-WBhXofeHVV1DxnAYmOc2wCyiAAAAAGi96FJtYXRlbw==",
-        credential: "a9a92c76-8c27-11f0-8830-0242ac120004",
-        urls: [
-          "turn:sp-turn1.xirsys.com:80?transport=udp",
-          "turn:sp-turn1.xirsys.com:3478?transport=udp",
-          "turn:sp-turn1.xirsys.com:80?transport=tcp",
-          "turn:sp-turn1.xirsys.com:3478?transport=tcp",
-          "turns:sp-turn1.xirsys.com:443?transport=tcp",
-          "turns:sp-turn1.xirsys.com:5349?transport=tcp"
-        ]
-      }
-    ]
-  };
+// CONFIGURACIÓN CORREGIDA
+const RTC_CONFIG = {
+  iceServers: [
+    // Servidores STUN públicos de Google (funcionan mejor)
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" },
+    { urls: "stun:stun2.l.google.com:19302" },
+    { urls: "stun:stun3.l.google.com:19302" },
+    { urls: "stun:stun4.l.google.com:19302" },
+    
+    // Servidores TURN alternativos (gratuitos)
+    { 
+      urls: "turn:openrelay.metered.ca:80",
+      username: "openrelayproject",
+      credential: "openrelayproject"
+    },
+    { 
+      urls: "turn:openrelay.metered.ca:443",
+      username: "openrelayproject", 
+      credential: "openrelayproject"
+    },
+    { 
+      urls: "turn:openrelay.metered.ca:443?transport=tcp",
+      username: "openrelayproject",
+      credential: "openrelayproject"
+    }
+  ],
+  iceTransportPolicy: "all", // Intenta ambos: relay y host
+  bundlePolicy: "max-bundle",
+  rtcpMuxPolicy: "require"
+};
 
   // Cargar usuario al montar
   useEffect(() => {
