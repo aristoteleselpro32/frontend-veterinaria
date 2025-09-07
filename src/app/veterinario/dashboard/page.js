@@ -1,3 +1,4 @@
+
 "use client";
 import { useState, useEffect, useRef } from "react";
 import Agenda from "./agenda";
@@ -22,23 +23,6 @@ import { FaBell, FaUserCircle, FaPhone, FaPhoneSlash } from "react-icons/fa";
 import Cookies from "js-cookie";
 import { io } from "socket.io-client";
 
-// Función auxiliar para reproducción segura de video
-const safePlay = async (videoElement) => {
-  if (!videoElement) return;
-  
-  try {
-    const playPromise = videoElement.play();
-    if (playPromise !== undefined) {
-      await playPromise;
-    }
-  } catch (error) {
-    // Ignorar AbortError ya que es común en WebRTC
-    if (error.name !== 'AbortError') {
-      console.warn("Error en safePlay:", error);
-    }
-  }
-};
-
 export default function VeterinarioDashboard() {
   const [view, setView] = useState("agenda");
   const [user, setUser] = useState(null);
@@ -55,8 +39,6 @@ export default function VeterinarioDashboard() {
   const [waitingForOffer, setWaitingForOffer] = useState(false);
   const [showEndCallModal, setShowEndCallModal] = useState(false);
   const [endCallForm, setEndCallForm] = useState({ precio: "", motivo: "emergencia" });
-  const [localVideoReady, setLocalVideoReady] = useState(false);
-  const [remoteVideoReady, setRemoteVideoReady] = useState(false);
 
   // Refs para WebRTC
   const socketRef = useRef(null);
@@ -66,38 +48,25 @@ export default function VeterinarioDashboard() {
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
 
-  // Configuración ICE con Xirsys
-// CONFIGURACIÓN CORREGIDA
-const RTC_CONFIG = {
-  iceServers: [
-    // Servidores STUN públicos de Google (funcionan mejor)
-    { urls: "stun:stun.l.google.com:19302" },
-    { urls: "stun:stun1.l.google.com:19302" },
-    { urls: "stun:stun2.l.google.com:19302" },
-    { urls: "stun:stun3.l.google.com:19302" },
-    { urls: "stun:stun4.l.google.com:19302" },
-    
-    // Servidores TURN alternativos (gratuitos)
-    { 
-      urls: "turn:openrelay.metered.ca:80",
-      username: "openrelayproject",
-      credential: "openrelayproject"
-    },
-    { 
-      urls: "turn:openrelay.metered.ca:443",
-      username: "openrelayproject", 
-      credential: "openrelayproject"
-    },
-    { 
-      urls: "turn:openrelay.metered.ca:443?transport=tcp",
-      username: "openrelayproject",
-      credential: "openrelayproject"
-    }
-  ],
-  iceTransportPolicy: "all", // Intenta ambos: relay y host
-  bundlePolicy: "max-bundle",
-  rtcpMuxPolicy: "require"
-};
+  // Configuración ICE mejorada
+  const RTC_CONFIG = {
+    iceServers: [
+      { urls: "stun:stun.l.google.com:19302" },
+      { urls: "stun:stun1.l.google.com:19302" },
+      { urls: "stun:stun2.l.google.com:19302" },
+      { urls: "stun:stun.relay.metered.ca:80" },
+      {
+        urls: ["turn:openrelay.metered.ca:80", "turn:openrelay.metered.ca:443"],
+        username: "openrelayproject",
+        credential: "openrelayproject",
+      },
+      {
+        urls: "turn:turn.relay.metered.ca:443",
+        username: "openrelayproject",
+        credential: "openrelayproject",
+      },
+    ],
+  };
 
   // Cargar usuario al montar
   useEffect(() => {
@@ -174,47 +143,47 @@ const RTC_CONFIG = {
     };
   }, [user]);
 
-  // Reproducción de video mejorada
+  // Asigna streams a videos y activa audio
   useEffect(() => {
-    const handleVideoPlayback = async () => {
-      if (callAccepted) {
-        // Pequeño delay para asegurar que los elementos estén listos
-        setTimeout(() => {
-          if (localVideoRef.current && localStreamRef.current) {
-            localVideoRef.current.srcObject = localStreamRef.current;
-            safePlay(localVideoRef.current);
-          }
-          
-          if (remoteVideoRef.current && remoteStreamRef.current) {
-            remoteVideoRef.current.srcObject = remoteStreamRef.current;
-            safePlay(remoteVideoRef.current);
-          }
-        }, 500);
+    const playVideo = async (videoRef, stream) => {
+      if (videoRef.current && stream && stream.getTracks().length > 0) {
+        if (!videoRef.current.srcObject) {
+          videoRef.current.srcObject = stream;
+        }
+        const playPromise = videoRef.current.play();
+        if (playPromise !== undefined) {
+          playPromise
+            .then(() => {
+              console.log("Reproducción iniciada correctamente:", stream.getTracks().map((t) => t.kind));
+            })
+            .catch((error) => {
+              console.error("Error al reproducir video:", error);
+              if (error.name === "AbortError") {
+                setTimeout(() => playVideo(videoRef, stream), 500); // Reintento después de 500ms
+              }
+            });
+        }
       }
     };
 
-    handleVideoPlayback();
-  }, [callAccepted, localVideoReady, remoteVideoReady]);
+    if (callAccepted && localVideoRef.current && localStreamRef.current) {
+      playVideo(localVideoRef, localStreamRef.current);
+    }
+    if (callAccepted && remoteVideoRef.current && remoteStreamRef.current) {
+      playVideo(remoteVideoRef, remoteStreamRef.current);
+    }
+  }, [callAccepted]);
 
   // Limpieza adicional al desmontar
   useEffect(() => {
     return () => {
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = null;
-        localVideoRef.current.pause();
-      }
-      if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = null;
-        remoteVideoRef.current.pause();
-      }
+      if (localVideoRef.current) localVideoRef.current.srcObject = null;
+      if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
     };
   }, []);
 
   // Manejar llamada WebRTC entrante
   const handleIncomingWebRTCCall = async (from, offerSdp) => {
-    let retryCount = 0;
-    const maxRetries = 3;
-
     try {
       setCallStatus("connecting");
 
@@ -255,56 +224,36 @@ const RTC_CONFIG = {
         }
       };
 
-      // Manejo mejorado de tracks remotos
       pc.ontrack = (event) => {
-        console.log("📹 Track remoto recibido:", event.track.kind);
-        
         if (event.streams && event.streams[0]) {
-          const incomingStream = event.streams[0];
-          
-          // Limpiar tracks antiguos primero
-          if (remoteStreamRef.current) {
-            remoteStreamRef.current.getTracks().forEach(track => track.stop());
+          if (!remoteStreamRef.current) {
+            remoteStreamRef.current = new MediaStream();
+            if (remoteVideoRef.current && !remoteVideoRef.current.srcObject) {
+              remoteVideoRef.current.srcObject = remoteStreamRef.current;
+              remoteVideoRef.current
+                .play()
+                .catch((e) =>
+                  console.error("Error inicial al reproducir video remoto:", e)
+                );
+            }
           }
-          
-          remoteStreamRef.current = incomingStream;
-          
-          // Reproducir después de un pequeño delay para evitar conflictos
-          setTimeout(() => {
-            if (remoteVideoRef.current) {
-              remoteVideoRef.current.srcObject = null;
-              remoteVideoRef.current.srcObject = incomingStream;
-              
-              const playPromise = remoteVideoRef.current.play();
-              if (playPromise !== undefined) {
-                playPromise
-                  .then(() => {
-                    console.log("✅ Video remoto reproduciéndose");
-                  })
-                  .catch(error => {
-                    console.warn("⚠️ Error en play promise:", error);
-                    // Silenciar el error de AbortError ya que es común en WebRTC
-                    if (error.name !== 'AbortError') {
-                      console.error("Error al reproducir video remoto:", error);
-                    }
-                  });
+          event.streams[0].getTracks().forEach((track) => {
+            console.log("Añadiendo track remoto:", track.kind);
+            if (!remoteStreamRef.current.getTracks().some((t) => t.id === track.id)) {
+              remoteStreamRef.current.addTrack(track);
+              if (remoteVideoRef.current && track.kind === "audio") {
+                remoteVideoRef.current
+                  .play()
+                  .catch((e) => console.error("Error al reproducir audio:", e));
               }
             }
-          }, 100);
+          });
         }
       };
 
       pc.oniceconnectionstatechange = () => {
         console.log("ICE connection state:", pc.iceConnectionState);
-        if (pc.iceConnectionState === "disconnected" && retryCount < maxRetries) {
-          console.log(`Reintentando conexión (${retryCount + 1}/${maxRetries})...`);
-          retryCount++;
-          setTimeout(() => {
-            if (pcRef.current) {
-              pcRef.current.restartIce();
-            }
-          }, 1000);
-        } else if (pc.iceConnectionState === "disconnected" || pc.iceConnectionState === "failed") {
+        if (pc.iceConnectionState === "disconnected" || pc.iceConnectionState === "failed") {
           setCallStatus("error");
           socketRef.current.emit("finalizar_llamada", {
             veterinarioId: user.id || user._id,
@@ -420,46 +369,26 @@ const RTC_CONFIG = {
       });
     }
 
-    // Detener todos los tracks de medios
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach(track => {
-        track.stop();
-        track.enabled = false;
+    if (pcRef.current) {
+      pcRef.current.getSenders().forEach((sender) => {
+        sender.track?.stop();
       });
+      pcRef.current.close();
+      pcRef.current = null;
+    }
+
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((track) => track.stop());
       localStreamRef.current = null;
     }
 
     if (remoteStreamRef.current) {
-      remoteStreamRef.current.getTracks().forEach(track => {
-        track.stop();
-        track.enabled = false;
-      });
+      remoteStreamRef.current.getTracks().forEach((track) => track.stop());
       remoteStreamRef.current = null;
     }
 
-    // Limpiar referencias de video
-    if (localVideoRef.current) {
-      localVideoRef.current.srcObject = null;
-      localVideoRef.current.pause();
-    }
-
-    if (remoteVideoRef.current) {
-      remoteVideoRef.current.srcObject = null;
-      remoteVideoRef.current.pause();
-    }
-
-    // Cerrar conexión PeerConnection
-    if (pcRef.current) {
-      try {
-        pcRef.current.getSenders().forEach(sender => {
-          if (sender.track) sender.track.stop();
-        });
-        pcRef.current.close();
-      } catch (e) {
-        console.error("Error al cerrar peer connection:", e);
-      }
-      pcRef.current = null;
-    }
+    if (localVideoRef.current) localVideoRef.current.srcObject = null;
+    if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
 
     setCallAccepted(false);
     setIncomingCall(null);
@@ -469,8 +398,6 @@ const RTC_CONFIG = {
     setShowCallModal(false);
     setWaitingForOffer(false);
     setEndCallForm({ precio: "50", motivo: "emergencia" });
-    setLocalVideoReady(false);
-    setRemoteVideoReady(false);
   };
 
   // Cerrar sesión
@@ -753,8 +680,6 @@ const RTC_CONFIG = {
                 height: "100%",
                 objectFit: "cover",
               }}
-              onLoadedMetadata={() => setRemoteVideoReady(true)}
-              onCanPlay={() => safePlay(remoteVideoRef.current)}
             />
           </div>
 
@@ -798,8 +723,6 @@ const RTC_CONFIG = {
                 objectFit: "cover",
                 transform: "scaleX(-1)",
               }}
-              onLoadedMetadata={() => setLocalVideoReady(true)}
-              onCanPlay={() => safePlay(localVideoRef.current)}
             />
           </div>
 
@@ -831,3 +754,6 @@ const RTC_CONFIG = {
     </Container>
   );
 }
+
+
+
