@@ -745,42 +745,32 @@ export default function Home() {
 
         // Manejo mejorado de tracks remotos
         pc.ontrack = (event) => {
-          console.log("📹 Track remoto recibido:", event.track.kind);
-          
-          if (event.streams && event.streams[0]) {
-            const incomingStream = event.streams[0];
-            
-            // Limpiar tracks antiguos primero
-            if (remoteStreamRef.current) {
-              remoteStreamRef.current.getTracks().forEach(track => track.stop());
-            }
-            
-            remoteStreamRef.current = incomingStream;
-            
-            // Reproducir después de un pequeño delay para evitar conflictos
-            setTimeout(() => {
-              if (remoteVideoRef.current) {
-                remoteVideoRef.current.srcObject = null;
-                remoteVideoRef.current.srcObject = incomingStream;
-                
-                const playPromise = remoteVideoRef.current.play();
-                if (playPromise !== undefined) {
-                  playPromise
-                    .then(() => {
-                      console.log("✅ Video remoto reproduciéndose");
-                    })
-                    .catch(error => {
-                      console.warn("⚠️ Error en play promise:", error);
-                      // Silenciar el error de AbortError ya que es común en WebRTC
-                      if (error.name !== 'AbortError') {
-                        console.error("Error al reproducir video remoto:", error);
-                      }
-                    });
-                }
-              }
-            }, 100);
+  console.log("📹 Track remoto recibido:", event.track.kind);
+  
+  if (event.streams && event.streams[0]) {
+    const incomingStream = event.streams[0];
+    
+    if (remoteStreamRef.current) {
+      remoteStreamRef.current.getTracks().forEach(track => track.stop());
+    }
+    
+    remoteStreamRef.current = incomingStream;
+    
+    setTimeout(() => {
+      if (remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = null;
+        remoteVideoRef.current.srcObject = incomingStream;
+        
+        // SOLUCIÓN: Silenciar completamente el error AbortError
+        remoteVideoRef.current.play().catch(error => {
+          if (error.name !== 'AbortError') {
+            console.warn("Error al reproducir:", error);
           }
-        };
+        });
+      }
+    }, 100);
+  }
+};
 
         pc.onicecandidate = (event) => {
           if (event.candidate) {
