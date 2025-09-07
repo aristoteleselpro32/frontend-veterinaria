@@ -1,5 +1,7 @@
 "use client";
+import React from "react";
 import { useEffect, useState } from "react";
+import { getLocalStorage } from "@/utils/storage";
 import {
   Container,
   Row,
@@ -46,33 +48,39 @@ export default function UsuarioDashboard() {
 
   // Detectar tema del sistema o localStorage
   useEffect(() => {
-    const savedTheme = localStorage.getItem("theme");
-    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    const initialTheme = savedTheme || (prefersDark ? "dark" : "light");
-    setTheme(initialTheme);
-    document.documentElement.setAttribute("data-bs-theme", initialTheme);
-    localStorage.setItem("theme", initialTheme);
+    if (typeof window !== "undefined") {
+      const savedTheme = localStorage.getItem("theme");
+      const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      const initialTheme = savedTheme || (prefersDark ? "dark" : "light");
+      setTheme(initialTheme);
+      document.documentElement.setAttribute("data-bs-theme", initialTheme);
+      localStorage.setItem("theme", initialTheme);
+    }
   }, []);
 
   // Cambiar tema
   const toggleTheme = () => {
-    const newTheme = theme === "dark" ? "light" : "dark";
-    setTheme(newTheme);
-    document.documentElement.setAttribute("data-bs-theme", newTheme);
-    localStorage.setItem("theme", newTheme);
+    if (typeof window !== "undefined") {
+      const newTheme = theme === "dark" ? "light" : "dark";
+      setTheme(newTheme);
+      document.documentElement.setAttribute("data-bs-theme", newTheme);
+      localStorage.setItem("theme", newTheme);
+    }
   };
 
   // Cargar mascotas
   useEffect(() => {
-    const user = JSON.parse(localStorage.getItem("user"));
-    if (!user?.id) return;
-    fetch(`https://mascota-service.onrender.com/api/mascotas/mascotascliente/${user.id}`)
-      .then((r) => r.json())
-      .then((data) => {
-        setMascotas(data || []);
-        if ((data || []).length > 0) setMascotaActual(data[0]);
-      })
-      .catch((e) => console.error("Error cargando mascotas:", e));
+    if (typeof window !== "undefined") {
+      const user = JSON.parse(localStorage.getItem("user"));
+      if (!user?.id) return;
+      fetch(`https://mascota-service.onrender.com/api/mascotas/mascotascliente/${user.id}`)
+        .then((r) => r.json())
+        .then((data) => {
+          setMascotas(data || []);
+          if ((data || []).length > 0) setMascotaActual(data[0]);
+        })
+        .catch((e) => console.error("Error cargando mascotas:", e));
+    }
   }, []);
 
   // Cargar servicios y cartilla
@@ -127,7 +135,9 @@ export default function UsuarioDashboard() {
   // Funciones para manejar mascotas y solicitudes
   const agregarMascota = async () => {
     try {
+      if (typeof window === "undefined") return;
       const user = JSON.parse(localStorage.getItem("user"));
+      if (!user?.id) throw new Error("Usuario no encontrado");
       const res = await fetch("https://mascota-service.onrender.com/api/mascotas/mascotas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -170,12 +180,14 @@ export default function UsuarioDashboard() {
         body: JSON.stringify(editMascota),
       });
       if (!res.ok) throw new Error("Error actualizando mascota");
-      const user = JSON.parse(localStorage.getItem("user"));
-      const r = await fetch(`https://mascota-service.onrender.com/api/mascotas/mascotascliente/${user.id}`);
-      const data = await r.json();
-      setMascotas(data || []);
-      const actualizado = (data || []).find((x) => (x.id || x._id) === id) || editMascota;
-      setMascotaActual(actualizado);
+      if (typeof window !== "undefined") {
+        const user = JSON.parse(localStorage.getItem("user"));
+        const r = await fetch(`https://mascota-service.onrender.com/api/mascotas/mascotascliente/${user.id}`);
+        const data = await r.json();
+        setMascotas(data || []);
+        const actualizado = (data || []).find((x) => (x.id || x._id) === id) || editMascota;
+        setMascotaActual(actualizado);
+      }
       setShowModalEditar(false);
       setAlertMsg({ type: "success", text: "✅ Datos de mascota actualizados." });
     } catch (err) {
@@ -191,6 +203,7 @@ export default function UsuarioDashboard() {
 
   const enviarSolicitudCartilla = async () => {
     try {
+      if (typeof window === "undefined") return;
       const user = JSON.parse(localStorage.getItem("user"));
       if (!user?.id) {
         setAlertMsg({ type: "warning", text: "Por favor inicia sesión antes de solicitar una cartilla." });
@@ -397,7 +410,6 @@ export default function UsuarioDashboard() {
                   </React.Fragment>
                 ))}
               </tbody>
-
             </Table>
           )}
         </Accordion.Body>
@@ -997,7 +1009,7 @@ export default function UsuarioDashboard() {
               <Form.Group className="mb-3">
                 <Form.Label className="fw-bold">Cliente (auto)</Form.Label>
                 <Form.Control
-                  value={JSON.parse(localStorage.getItem("user"))?.nombre || ""}
+                  value={typeof window !== "undefined" ? JSON.parse(localStorage.getItem("user"))?.nombre || "" : ""}
                   disabled
                   style={{
                     backgroundColor: theme === "dark" ? "#2d3748" : "#ffffff",
