@@ -1,3 +1,4 @@
+```jsx
 "use client";
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
@@ -381,6 +382,7 @@ export default function Home() {
       if (!pcRef.current || !payload.candidate) return;
       try {
         await pcRef.current.addIceCandidate(new RTCIceCandidate(payload.candidate));
+        console.log("✅ ICE candidate añadido:", payload.candidate);
       } catch (err) {
         console.error("❌ Error addIceCandidate:", err);
       }
@@ -389,7 +391,7 @@ export default function Home() {
     s.on("llamada_ocupado", (payload) => {
       console.log("🚫 Veterinario ocupado:", payload);
       setCallStatus("ocupado");
-      setQueuePosition(null);
+      setQueuePosition(payload?.posicion ?? null);
     });
 
     s.on("llamada_rechazada", (payload) => {
@@ -437,33 +439,37 @@ export default function Home() {
     };
   }, [user]);
 
-useEffect(() => {
-  const playVideo = async (videoRef, stream) => {
-    if (videoRef.current && stream && stream.getTracks().length > 0) {
-      // Solo asignar srcObject si no está ya asignado
-      if (!videoRef.current.srcObject) {
-        videoRef.current.srcObject = stream;
-      }
-      try {
-        await videoRef.current.play();
-        console.log("Reproducción iniciada correctamente");
-      } catch (error) {
-        console.error("Error al reproducir video:", error);
-        if (error.name === "AbortError") {
-          // Reintentar después de 500ms
-          setTimeout(() => playVideo(videoRef, stream), 500);
+  // Reproducción de video
+  useEffect(() => {
+    const playVideo = async (videoRef, stream) => {
+      if (videoRef.current && stream && stream.getTracks().length > 0) {
+        if (!videoRef.current.srcObject) {
+          videoRef.current.srcObject = stream;
+          try {
+            await videoRef.current.play();
+            console.log("Reproducción iniciada correctamente:", stream.getTracks().map((t) => t.kind));
+          } catch (error) {
+            console.error("Error al reproducir video:", error);
+            if (error.name === "AbortError") {
+              setTimeout(() => {
+                if (videoRef.current && stream && !videoRef.current.srcObject) {
+                  videoRef.current.srcObject = stream;
+                  videoRef.current.play().catch((e) => console.error("Reintento fallido:", e));
+                }
+              }, 500);
+            }
+          }
         }
       }
-    }
-  };
+    };
 
-  if (callInProgress && localVideoRef.current && localStreamRef.current) {
-    playVideo(localVideoRef, localStreamRef.current);
-  }
-  if (callInProgress && remoteVideoRef.current && remoteStreamRef.current) {
-    playVideo(remoteVideoRef, remoteStreamRef.current);
-  }
-}, [callInProgress, localStreamRef.current, remoteStreamRef.current]);
+    if (callInProgress && localVideoRef.current && localStreamRef.current) {
+      playVideo(localVideoRef, localStreamRef.current);
+    }
+    if (callInProgress && remoteVideoRef.current && remoteStreamRef.current) {
+      playVideo(remoteVideoRef, remoteStreamRef.current);
+    }
+  }, [callInProgress]);
 
   // Limpieza al desmontar
   useEffect(() => {
@@ -659,157 +665,177 @@ useEffect(() => {
     setShowEmergencyModal(true);
     setCallStatus("");
     setQueuePosition(null);
-    askAndLoadCameras();
+    await askAndLoadCameras();
   };
 
   // Iniciar videollamada
-// Iniciar videollamada
-const iniciarLlamada = async () => {
-  if (!socket) return alert("Socket no conectado");
-  if (!selectedVetForCall) return alert("Selecciona un veterinario para la llamada.");
-
-  if (!user) {
-    setGuestError("");
-    if (!guestName || !guestPhone) {
-      setShowGuestModal(true);
+  const iniciarLlamada = async () => {
+    if (!socket) {
+      alert("Error: Socket no conectado");
+      setCallStatus("error");
       return;
     }
-  }
+    if (!selectedVetForCall) {
+      alert("Selecciona un veterinario para la llamada.");
+      setCallStatus("error");
+      return;
+    }
 
-  let retryCount = 0;
-  const maxRetries = 3;
+    if (!user) {
+      setGuestError("");
+      if (!guestName || !guestPhone) {
+        setShowGuestModal(true);
+        return;
+      }
+    }
 
-  const attemptConnection = async () => {
-    try {
-      setCallStatus("conectando");
-      setQueuePosition(null);
+    let retryCount = 0;
+    const maxRetries = 3;
 
-      const constraints = {
-        video: {
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          ...(selectedCameraId ? { deviceId: { exact: selectedCameraId } } : { facingMode: "user" }),
-        },
-        audio: true,
-      };
+    const attemptConnection = async () => {
+      try {
+        setCallStatus("conectando");
+        setQueuePosition(null);
 
-      const stream = await navigator.mediaDevices.getUserMedia(constraints).catch((err) => {
-        console.error("Error al acceder a medios:", err);
-        if (err.name === "NotAllowedError") {
-          throw new Error("Permisos de cámara o micrófono denegados. Por favor, concede los permisos.");
-        } else if (err.name === "NotFoundError") {
-          throw new Error("No se encontraron dispositivos de cámara o micrófono.");
-        } else {
-          throw new Error("No se pudo acceder a la cámara o micrófono: " + err.message);
-        }
-      });
+        const constraints = {
+          video: {
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            ...(selectedCameraId ? { deviceId: { exact: selectedCameraId } } : { facingMode: "user" }),
+          },
+          audio: true,
+        };
 
-      localStreamRef.current = stream;
+        const stream = await navigator.mediaDevices.getUserMedia(constraints).catch((err) => {
+          console.error("Error al acceder a medios:", err);
+          if (err.name === "NotAllowedError") {
+            throw new Error("Permisos de cámara o micrófono denegados. Por favor, concede los permisos.");
+          } else if (err.name === "NotFoundError") {
+            throw new Error("No se encontraron dispositivos de cámara o micrófono.");
+          } else {
+            throw new Error("No se pudo acceder a la cámara o micrófono: " + err.message);
+          }
+        });
 
-      const pc = new RTCPeerConnection(RTC_CONFIG);
-      pcRef.current = pc;
+        localStreamRef.current = stream;
 
-      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+        const pc = new RTCPeerConnection(RTC_CONFIG);
+        pcRef.current = pc;
 
-      const remoteStream = new MediaStream();
-      remoteStreamRef.current = remoteStream;
+        stream.getTracks().forEach((track) => {
+          console.log("Añadiendo track local:", track.kind);
+          pc.addTrack(track, stream);
+        });
 
-      pc.ontrack = (event) => {
-        if (event.streams && event.streams[0]) {
-          event.streams[0].getTracks().forEach((track) => {
-            if (!remoteStream.getTracks().some((t) => t.id === track.id)) {
-              remoteStream.addTrack(track);
-              console.log("Añadiendo track remoto:", track.kind);
-            }
-          });
-          // Asignar srcObject solo si no está asignado
-          if (remoteVideoRef.current && !remoteVideoRef.current.srcObject) {
-            remoteVideoRef.current.srcObject = remoteStream;
-            const playPromise = remoteVideoRef.current.play();
-            if (playPromise !== undefined) {
-              playPromise
-                .then(() => {
-                  console.log("Reproducción remota iniciada correctamente");
-                })
-                .catch((error) => {
-                  console.error("Error al reproducir video remoto:", error);
-                  if (error.name === "AbortError") {
-                    setTimeout(() => {
-                      if (remoteVideoRef.current && remoteStreamRef.current) {
-                        remoteVideoRef.current.play().catch((e) => console.error("Reintento fallido:", e));
-                      }
-                    }, 500);
-                  }
-                });
+        const remoteStream = new MediaStream();
+        remoteStreamRef.current = remoteStream;
+
+        pc.ontrack = (event) => {
+          if (event.streams && event.streams[0]) {
+            event.streams[0].getTracks().forEach((track) => {
+              if (!remoteStream.getTracks().some((t) => t.id === track.id)) {
+                remoteStream.addTrack(track);
+                console.log("Añadiendo track remoto:", track.kind);
+              }
+            });
+            if (remoteVideoRef.current && !remoteVideoRef.current.srcObject) {
+              remoteVideoRef.current.srcObject = remoteStream;
+              const playPromise = remoteVideoRef.current.play();
+              if (playPromise !== undefined) {
+                playPromise
+                  .then(() => {
+                    console.log("Reproducción remota iniciada correctamente");
+                  })
+                  .catch((error) => {
+                    console.error("Error al reproducir video remoto:", error);
+                    if (error.name === "AbortError") {
+                      setTimeout(() => {
+                        if (remoteVideoRef.current && remoteStream) {
+                          remoteVideoRef.current.srcObject = remoteStream;
+                          remoteVideoRef.current.play().catch((e) => console.error("Reintento fallido:", e));
+                        }
+                      }, 500);
+                    }
+                  });
+              }
             }
           }
-        }
-      };
+        };
 
-      pc.onicecandidate = (event) => {
-        if (event.candidate) {
-          console.log("Enviando ICE candidate:", event.candidate);
-          socket.emit("webrtc_ice_candidate", {
-            to: selectedVetForCall,
-            from: user?.id || user?._id || user?.id_cliente || EMERGENCY_USER_ID,
-            candidate: event.candidate,
-          });
-        }
-      };
+        pc.onicecandidate = (event) => {
+          if (event.candidate) {
+            console.log("Enviando ICE candidate:", event.candidate);
+            socket.emit("webrtc_ice_candidate", {
+              to: selectedVetForCall,
+              from: user?.id || user?._id || user?.id_cliente || EMERGENCY_USER_ID,
+              candidate: event.candidate,
+            });
+          }
+        };
 
-      pc.oniceconnectionstatechange = () => {
-        console.log("ICE connection state:", pc.iceConnectionState);
-        if (pc.iceConnectionState === "disconnected" && retryCount < maxRetries) {
-          console.log(`Reintentando conexión (${retryCount + 1}/${maxRetries})...`);
-          retryCount++;
-          setTimeout(() => {
-            if (pcRef.current) {
-              pcRef.current.restartIce();
-            }
-          }, 1000);
-        } else if (pc.iceConnectionState === "disconnected" || pc.iceConnectionState === "failed") {
-          setCallStatus("error");
-          finalizarLlamada(false);
-        }
-      };
+        pc.oniceconnectionstatechange = () => {
+          console.log("ICE connection state:", pc.iceConnectionState);
+          if (pc.iceConnectionState === "disconnected" && retryCount < maxRetries) {
+            console.log(`Reintentando conexión (${retryCount + 1}/${maxRetries})...`);
+            retryCount++;
+            setCallStatus("reconectando");
+            setTimeout(() => {
+              if (pcRef.current) {
+                pcRef.current.restartIce();
+              }
+            }, 1000);
+          } else if (pc.iceConnectionState === "disconnected" || pc.iceConnectionState === "failed") {
+            console.log("❌ Conexión ICE fallida después de reintentos");
+            setCallStatus("error");
+            socket.emit("finalizar_llamada", {
+              usuarioId: user?.id || user?._id || user?.id_cliente || EMERGENCY_USER_ID,
+              veterinarioId: selectedVetForCall,
+            });
+            finalizarLlamada(false);
+          } else if (pc.iceConnectionState === "connected") {
+            setCallStatus("en_llamada");
+          }
+        };
 
-      const offer = await pc.createOffer({
-        offerToReceiveAudio: true,
-        offerToReceiveVideo: true,
-      });
-      await pc.setLocalDescription(offer);
+        const offer = await pc.createOffer({
+          offerToReceiveAudio: true,
+          offerToReceiveVideo: true,
+        });
+        await pc.setLocalDescription(offer);
 
-      socket.emit("iniciar_llamada", {
-        usuarioId: user?.id || user?._id || user?.id_cliente || EMERGENCY_USER_ID,
-        veterinarioId: selectedVetForCall,
-        motivo: "Emergencia",
-        extra: {
-          cliente_nombre: user ? user.nombre : guestName,
-          cliente_telefono: user ? user.telefono : guestPhone,
-        },
-      });
+        socket.emit("iniciar_llamada", {
+          usuarioId: user?.id || user?._id || user?.id_cliente || EMERGENCY_USER_ID,
+          veterinarioId: selectedVetForCall,
+          motivo: "Emergencia",
+          extra: {
+            cliente_nombre: user ? user.nombre : guestName,
+            cliente_telefono: user ? user.telefono : guestPhone,
+          },
+        });
 
-      socket.emit("webrtc_offer", {
-        to: selectedVetForCall,
-        from: user?.id || user?._id || user?.id_cliente || EMERGENCY_USER_ID,
-        sdp: pc.localDescription,
-      });
+        socket.emit("webrtc_offer", {
+          to: selectedVetForCall,
+          from: user?.id || user?._id || user?.id_cliente || EMERGENCY_USER_ID,
+          sdp: pc.localDescription,
+        });
 
-      setCallInProgress(true);
-      setCallStatus("esperando");
-    } catch (err) {
-      console.error("❌ Error al iniciar llamada:", err);
-      setCallStatus("error");
-      finalizarLlamada(false);
-      alert(`Error: ${err.message}`);
-    }
+        setCallInProgress(true);
+        setCallStatus("esperando");
+      } catch (err) {
+        console.error("❌ Error al iniciar llamada:", err);
+        setCallStatus("error");
+        alert(`Error: ${err.message}`);
+        finalizarLlamada(false);
+      }
+    };
+
+    await attemptConnection();
   };
-};
 
   // Finalizar llamada
   const finalizarLlamada = async (emitFinalize = true) => {
     try {
-      if (emitFinalize && socket) {
+      if (emitFinalize && socket && selectedVetForCall) {
         socket.emit("finalizar_llamada", {
           usuarioId: user?.id || user?._id || user?.id_cliente || EMERGENCY_USER_ID,
           veterinarioId: selectedVetForCall,
@@ -821,6 +847,9 @@ const iniciarLlamada = async () => {
 
     if (pcRef.current) {
       try {
+        pcRef.current.getSenders().forEach((sender) => {
+          if (sender.track) sender.track.stop();
+        });
         pcRef.current.close();
       } catch (e) {
         console.error("Error al cerrar peer connection:", e);
@@ -1451,11 +1480,15 @@ const iniciarLlamada = async () => {
                         borderColor: currentTheme.formBorder,
                       }}
                     >
-                      {veterinarios.map((v) => (
-                        <option key={v.id || v._id} value={v.id || v._id}>
-                          {v.nombre} {v.apellido || ""}
-                        </option>
-                      ))}
+                      {veterinarios.length === 0 ? (
+                        <option disabled>No hay veterinarios disponibles</option>
+                      ) : (
+                        veterinarios.map((v) => (
+                          <option key={v.id || v._id} value={v.id || v._id}>
+                            {v.nombre} {v.apellido || ""}
+                          </option>
+                        ))
+                      )}
                     </Form.Select>
                   </Form.Group>
                 </Col>
@@ -1527,6 +1560,11 @@ const iniciarLlamada = async () => {
                   Error al iniciar la llamada. Por favor, intenta de nuevo.
                 </Alert>
               )}
+              {callStatus === "reconectando" && (
+                <Alert variant="warning" className="mt-3">
+                  Intentando reconectar...
+                </Alert>
+              )}
 
               <div className="d-flex justify-content-center gap-3 mt-4 flex-wrap">
                 <Button
@@ -1540,9 +1578,9 @@ const iniciarLlamada = async () => {
                   variant="danger"
                   className="btn-animated"
                   onClick={iniciarLlamada}
-                  disabled={callStatus === "en_cola" || callStatus === "conectando"}
+                  disabled={callStatus === "en_cola" || callStatus === "conectando" || callStatus === "reconectando"}
                 >
-                  {callStatus === "conectando" ? (
+                  {callStatus === "conectando" || callStatus === "reconectando" ? (
                     <>
                       <Spinner animation="border" size="sm" /> Conectando...
                     </>
@@ -1597,15 +1635,17 @@ const iniciarLlamada = async () => {
                 </div>
                 <div className="position-absolute top-0 start-0 p-2">
                   <span
-                    className={`badge ${callStatus === "en_llamada" ? "bg-success" : "bg-primary"}`}
+                    className={`badge ${callStatus === "en_llamada" ? "bg-success" : callStatus === "reconectando" ? "bg-warning" : "bg-primary"}`}
                   >
                     {callStatus === "esperando"
                       ? "Esperando respuesta..."
                       : callStatus === "en_llamada"
                         ? "En llamada"
-                        : callStatus === "en_cola"
-                          ? `En cola${queuePosition ? ` (posición ${queuePosition})` : ""}`
-                          : callStatus}
+                        : callStatus === "reconectando"
+                          ? "Reconectando..."
+                          : callStatus === "en_cola"
+                            ? `En cola${queuePosition ? ` (posición ${queuePosition})` : ""}`
+                            : "Error"}
                   </span>
                 </div>
               </div>
