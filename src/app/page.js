@@ -37,9 +37,9 @@ const RTC_CONFIG = {
     { urls: "stun:stun2.l.google.com:19302" },
     // TURN de ExpressTURN
     {
-      urls: ["turn:relay1.expressturn.com:3480"],
-      username: "000000002072632971",
-      credential: "bCZEPlojtu6lZtlzlEiPZlrwSqA="
+      urls: ["relay1.expressturn.com:3480"],
+      username: "000000002072635525",
+      credential: "5KqdyBdIjp4PgGLWqdMddf56Gqw="
     }
   ]
 };
