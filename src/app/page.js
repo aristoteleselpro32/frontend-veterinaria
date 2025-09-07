@@ -662,6 +662,7 @@ useEffect(() => {
     askAndLoadCameras();
   };
 
+  // Iniciar videollamada
 // Iniciar videollamada
 const iniciarLlamada = async () => {
   if (!socket) return alert("Socket no conectado");
@@ -803,6 +804,7 @@ const iniciarLlamada = async () => {
       alert(`Error: ${err.message}`);
     }
   };
+};
 
   // Finalizar llamada
   const finalizarLlamada = async (emitFinalize = true) => {
