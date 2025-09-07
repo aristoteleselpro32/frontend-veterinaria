@@ -306,15 +306,15 @@ export default function UsuarioDashboard() {
               </thead>
               <tbody>
                 {datos.map((item, i) => (
-                  <>
-                    <tr key={i}>
+                  <React.Fragment key={item.id || item._id || i}>
+                    <tr>
                       {fields.map((field, j) => (
                         <td key={j} className="text-center">
                           {field.key.includes("fecha")
                             ? format(new Date(item[field.key] || item.createdAt), "dd/MM/yyyy", { locale: es })
                             : field.key === "medicamentos"
-                            ? item[field.key]?.map((m) => m.nombre).join(", ") || "-"
-                            : item[field.key] || "-"}
+                              ? item[field.key]?.map((m) => m.nombre).join(", ") || "-"
+                              : item[field.key] || "-"}
                         </td>
                       ))}
                       {hasExamenFisico && (
@@ -338,6 +338,7 @@ export default function UsuarioDashboard() {
                         </td>
                       )}
                     </tr>
+
                     {hasExamenFisico && item.examen_fisico && (
                       <tr>
                         <td colSpan={fields.length + 1}>
@@ -376,13 +377,12 @@ export default function UsuarioDashboard() {
                                     ].map((key, k) => (
                                       <td key={k} className="text-center">
                                         {item.examen_fisico[key]
-                                          ? `${item.examen_fisico[key]} ${
-                                              key === "temperatura"
-                                                ? item.examen_fisico.unidad_temperatura
-                                                : key === "peso"
-                                                ? item.examen_fisico.unidad_peso
-                                                : ""
-                                            }`
+                                          ? `${item.examen_fisico[key]} ${key === "temperatura"
+                                            ? item.examen_fisico.unidad_temperatura
+                                            : key === "peso"
+                                              ? item.examen_fisico.unidad_peso
+                                              : ""
+                                          }`
                                           : "-"}
                                       </td>
                                     ))}
@@ -394,9 +394,10 @@ export default function UsuarioDashboard() {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </React.Fragment>
                 ))}
               </tbody>
+
             </Table>
           )}
         </Accordion.Body>
