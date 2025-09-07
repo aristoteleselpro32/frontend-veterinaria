@@ -28,25 +28,18 @@ const EMERGENCY_USER_ID = "750b4f1d-3912-4802-8df2-e6544ba860fd";
 // Configuración ICE para WebRTC
 const RTC_CONFIG = {
   iceServers: [
+    // STUN de Google
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
     { urls: "stun:stun2.l.google.com:19302" },
-    { urls: "stun:stun.relay.metered.ca:80" },
-    {
-      urls: [
-        "turn:openrelay.metered.ca:80",
-        "turn:openrelay.metered.ca:443", // Agregar puerto seguro
-      ],
-      username: "openrelayproject",
-      credential: "openrelayproject",
-    },
-    {
-      urls: "turn:turn.relay.metered.ca:443", // Servidor TURN adicional
-      username: "openrelayproject",
-      credential: "openrelayproject",
-    },
-  ],
+
+    // TURN público de Metered (no requiere usuario/clave)
+    { urls: "turn:openrelay.metered.ca:80" },
+    { urls: "turn:openrelay.metered.ca:443" },
+    { urls: "turn:openrelay.metered.ca:443?transport=tcp" }
+  ]
 };
+
 
 // Estilos CSS para animaciones y diseño responsivo
 const styles = `
