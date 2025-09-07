@@ -136,26 +136,33 @@ export default function VeterinarioDashboard() {
   }, [user]);
 
   // Asigna streams a videos y activa audio
-  useEffect(() => {
-    const playVideo = async (videoRef, stream) => {
-      if (videoRef.current && stream && stream.getTracks().length > 0) {
-        videoRef.current.srcObject = stream;
-        try {
-          await videoRef.current.play();
-          console.log("Reproduciendo stream:", stream.getTracks().map((t) => t.kind));
-        } catch (e) {
-          console.error("Error reproduciendo video:", e);
-        }
+useEffect(() => {
+  const playVideo = async (videoRef, stream) => {
+    if (videoRef.current && stream && stream.getTracks().length > 0) {
+      videoRef.current.srcObject = stream;
+      const playPromise = videoRef.current.play();
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => {
+            console.log("Reproducción iniciada correctamente:", stream.getTracks().map((t) => t.kind));
+          })
+          .catch((error) => {
+            console.error("Error al reproducir video:", error);
+            if (error.name === "AbortError") {
+              setTimeout(() => playVideo(videoRef, stream), 500); // Reintento después de 500ms
+            }
+          });
       }
-    };
+    }
+  };
 
-    if (callAccepted && localVideoRef.current && localStreamRef.current) {
-      playVideo(localVideoRef, localStreamRef.current);
-    }
-    if (callAccepted && remoteVideoRef.current && remoteStreamRef.current) {
-      playVideo(remoteVideoRef, remoteStreamRef.current);
-    }
-  }, [callAccepted]);
+  if (callAccepted && localVideoRef.current && localStreamRef.current) {
+    playVideo(localVideoRef, localStreamRef.current);
+  }
+  if (callAccepted && remoteVideoRef.current && remoteStreamRef.current) {
+    playVideo(remoteVideoRef, remoteStreamRef.current);
+  }
+}, [callAccepted]);
 
   // Limpieza adicional al desmontar
   useEffect(() => {

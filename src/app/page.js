@@ -441,26 +441,33 @@ export default function Home() {
     };
   }, [user]);
 
-  // Asignar streams a los videos
-  useEffect(() => {
-    const playVideo = async (videoRef, stream) => {
-      if (videoRef.current && stream && stream.getTracks().length > 0) {
-        videoRef.current.srcObject = stream;
-        try {
-          await videoRef.current.play();
-        } catch (e) {
-          console.error("Error reproduciendo video:", e);
-        }
+useEffect(() => {
+  const playVideo = async (videoRef, stream) => {
+    if (videoRef.current && stream && stream.getTracks().length > 0) {
+      videoRef.current.srcObject = stream;
+      const playPromise = videoRef.current.play();
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => {
+            console.log("Reproducción iniciada correctamente");
+          })
+          .catch((error) => {
+            console.error("Error al reproducir video:", error);
+            if (error.name === "AbortError") {
+              setTimeout(() => playVideo(videoRef, stream), 500);
+            }
+          });
       }
-    };
+    }
+  };
 
-    if (callInProgress && localVideoRef.current && localStreamRef.current) {
-      playVideo(localVideoRef, localStreamRef.current);
-    }
-    if (callInProgress && remoteVideoRef.current && remoteStreamRef.current) {
-      playVideo(remoteVideoRef, remoteVideoRef.current);
-    }
-  }, [callInProgress, localStreamRef.current, remoteStreamRef.current]);
+  if (callInProgress && localVideoRef.current && localStreamRef.current) {
+    playVideo(localVideoRef, localStreamRef.current);
+  }
+  if (callInProgress && remoteVideoRef.current && remoteStreamRef.current) {
+    playVideo(remoteVideoRef, remoteStreamRef.current);
+  }
+}, [callInProgress, localStreamRef.current, remoteStreamRef.current]);
 
   // Limpieza al desmontar
   useEffect(() => {
