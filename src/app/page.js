@@ -441,33 +441,33 @@ export default function Home() {
     };
   }, [user]);
 
-useEffect(() => {
-  const playVideo = async (videoRef, stream) => {
-    if (videoRef.current && stream && stream.getTracks().length > 0) {
-      videoRef.current.srcObject = stream;
-      const playPromise = videoRef.current.play();
-      if (playPromise !== undefined) {
-        playPromise
-          .then(() => {
-            console.log("Reproducción iniciada correctamente");
-          })
-          .catch((error) => {
-            console.error("Error al reproducir video:", error);
-            if (error.name === "AbortError") {
-              setTimeout(() => playVideo(videoRef, stream), 500);
-            }
-          });
+  useEffect(() => {
+    const playVideo = async (videoRef, stream) => {
+      if (videoRef.current && stream && stream.getTracks().length > 0) {
+        videoRef.current.srcObject = stream;
+        const playPromise = videoRef.current.play();
+        if (playPromise !== undefined) {
+          playPromise
+            .then(() => {
+              console.log("Reproducción iniciada correctamente");
+            })
+            .catch((error) => {
+              console.error("Error al reproducir video:", error);
+              if (error.name === "AbortError") {
+                setTimeout(() => playVideo(videoRef, stream), 500);
+              }
+            });
+        }
       }
-    }
-  };
+    };
 
-  if (callInProgress && localVideoRef.current && localStreamRef.current) {
-    playVideo(localVideoRef, localStreamRef.current);
-  }
-  if (callInProgress && remoteVideoRef.current && remoteStreamRef.current) {
-    playVideo(remoteVideoRef, remoteStreamRef.current);
-  }
-}, [callInProgress, localStreamRef.current, remoteStreamRef.current]);
+    if (callInProgress && localVideoRef.current && localStreamRef.current) {
+      playVideo(localVideoRef, localStreamRef.current);
+    }
+    if (callInProgress && remoteVideoRef.current && remoteStreamRef.current) {
+      playVideo(remoteVideoRef, remoteStreamRef.current);
+    }
+  }, [callInProgress, localStreamRef.current, remoteStreamRef.current]);
 
   // Limpieza al desmontar
   useEffect(() => {
@@ -1569,17 +1569,16 @@ useEffect(() => {
                 </div>
                 <div className="position-absolute top-0 start-0 p-2">
                   <span
-                    className={`badge ${
-                      callStatus === "en_llamada" ? "bg-success" : "bg-primary"
-                    }`}
+                    className={`badge ${callStatus === "en_llamada" ? "bg-success" : "bg-primary"
+                      }`}
                   >
                     {callStatus === "esperando"
                       ? "Esperando respuesta..."
                       : callStatus === "en_llamada"
-                      ? "En llamada"
-                      : callStatus === "en_cola"
-                      ? `En cola${queuePosition ? ` (posición ${queuePosition})` : ""}`
-                      : callStatus}
+                        ? "En llamada"
+                        : callStatus === "en_cola"
+                          ? `En cola${queuePosition ? ` (posición ${queuePosition})` : ""}`
+                          : callStatus}
                   </span>
                 </div>
               </div>
