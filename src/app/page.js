@@ -714,15 +714,16 @@ const iniciarLlamada = async () => {
     const remoteStream = new MediaStream();
     remoteStreamRef.current = remoteStream;
 
-    // Asignar y reproducir el stream remoto solo una vez
+    // Manejar tracks sin reasignar srcObject innecesariamente
     pc.ontrack = (event) => {
       if (event.streams && event.streams[0]) {
         event.streams[0].getTracks().forEach((track) => {
           if (!remoteStream.getTracks().some((t) => t.id === track.id)) {
             remoteStream.addTrack(track);
+            console.log("Añadiendo track remoto:", track.kind);
           }
         });
-        // Solo asignar y reproducir si no se ha hecho antes
+        // Asignar srcObject solo si no está asignado
         if (remoteVideoRef.current && !remoteVideoRef.current.srcObject) {
           remoteVideoRef.current.srcObject = remoteStream;
           const playPromise = remoteVideoRef.current.play();
@@ -1698,3 +1699,4 @@ const iniciarLlamada = async () => {
     </>
   );
 }
+
