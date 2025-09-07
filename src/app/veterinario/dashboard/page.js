@@ -1,4 +1,3 @@
-
 "use client";
 import { useState, useEffect, useRef } from "react";
 import Agenda from "./agenda";
@@ -754,6 +753,3 @@ export default function VeterinarioDashboard() {
     </Container>
   );
 }
-
-
-
