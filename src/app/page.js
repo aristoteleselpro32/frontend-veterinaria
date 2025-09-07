@@ -25,28 +25,24 @@ import "aos/dist/aos.css";
 // ID para usuarios invitados en llamadas de emergencia
 const EMERGENCY_USER_ID = "750b4f1d-3912-4802-8df2-e6544ba860fd";
 
-// Configuración ICE para WebRTC
+// Configuración ICE para WebRTC con Xirsys
 const RTC_CONFIG = {
   iceServers: [
-    // STUNs de Google
-    { urls: "stun:stun.l.google.com:19302" },
-    { urls: "stun:stun1.l.google.com:19302" },
-    { urls: "stun:stun2.l.google.com:19302" },
-
-    // TURN público openrelay (con credenciales dummy para que Chrome/Firefox no se queje)
+    { urls: "stun:sp-turn1.xirsys.com" },
     {
+      username: "_ee0X7Re6b3R-6JqKAJWd320SZoudP--4k4h7Bh-WBhXofeHVV1DxnAYmOc2wCyiAAAAAGi96FJtYXRlbw==",
+      credential: "a9a92c76-8c27-11f0-8830-0242ac120004",
       urls: [
-        "turn:openrelay.metered.ca:80",
-        "turn:openrelay.metered.ca:443",
-        "turn:openrelay.metered.ca:443?transport=tcp",
-      ],
-      username: "openrelayuser",
-      credential: "openrelaypass",
-    },
-  ],
+        "turn:sp-turn1.xirsys.com:80?transport=udp",
+        "turn:sp-turn1.xirsys.com:3478?transport=udp",
+        "turn:sp-turn1.xirsys.com:80?transport=tcp",
+        "turn:sp-turn1.xirsys.com:3478?transport=tcp",
+        "turns:sp-turn1.xirsys.com:443?transport=tcp",
+        "turns:sp-turn1.xirsys.com:5349?transport=tcp"
+      ]
+    }
+  ]
 };
-
-
 
 // Estilos CSS para animaciones y diseño responsivo
 const styles = `
@@ -667,136 +663,135 @@ export default function Home() {
   };
 
   // Iniciar videollamada
-// Iniciar videollamada
-const iniciarLlamada = async () => {
-  if (!socket) return alert("Socket no conectado");
-  if (!selectedVetForCall) return alert("Selecciona un veterinario para la llamada.");
+  const iniciarLlamada = async () => {
+    if (!socket) return alert("Socket no conectado");
+    if (!selectedVetForCall) return alert("Selecciona un veterinario para la llamada.");
 
-  if (!user) {
-    setGuestError("");
-    if (!guestName || !guestPhone) {
-      setShowGuestModal(true);
-      return;
-    }
-  }
-
-  try {
-    setCallStatus("conectando");
-    setQueuePosition(null);
-
-    const constraints = {
-      video: {
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
-        ...(selectedCameraId ? { deviceId: { exact: selectedCameraId } } : { facingMode: "user" }),
-      },
-      audio: true,
-    };
-
-    const stream = await navigator.mediaDevices.getUserMedia(constraints).catch((err) => {
-      console.error("Error al acceder a medios:", err);
-      if (err.name === "NotAllowedError") {
-        throw new Error("Permisos de cámara o micrófono denegados. Por favor, concede los permisos.");
-      } else if (err.name === "NotFoundError") {
-        throw new Error("No se encontraron dispositivos de cámara o micrófono.");
-      } else {
-        throw new Error("No se pudo acceder a la cámara o micrófono: " + err.message);
+    if (!user) {
+      setGuestError("");
+      if (!guestName || !guestPhone) {
+        setShowGuestModal(true);
+        return;
       }
-    });
+    }
 
-    localStreamRef.current = stream;
+    try {
+      setCallStatus("conectando");
+      setQueuePosition(null);
 
-    const pc = new RTCPeerConnection(RTC_CONFIG);
-    pcRef.current = pc;
+      const constraints = {
+        video: {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          ...(selectedCameraId ? { deviceId: { exact: selectedCameraId } } : { facingMode: "user" }),
+        },
+        audio: true,
+      };
 
-    stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+      const stream = await navigator.mediaDevices.getUserMedia(constraints).catch((err) => {
+        console.error("Error al acceder a medios:", err);
+        if (err.name === "NotAllowedError") {
+          throw new Error("Permisos de cámara o micrófono denegados. Por favor, concede los permisos.");
+        } else if (err.name === "NotFoundError") {
+          throw new Error("No se encontraron dispositivos de cámara o micrófono.");
+        } else {
+          throw new Error("No se pudo acceder a la cámara o micrófono: " + err.message);
+        }
+      });
 
-    const remoteStream = new MediaStream();
-    remoteStreamRef.current = remoteStream;
+      localStreamRef.current = stream;
 
-    // Manejar tracks sin reasignar srcObject innecesariamente
-    pc.ontrack = (event) => {
-      if (event.streams && event.streams[0]) {
-        event.streams[0].getTracks().forEach((track) => {
-          if (!remoteStream.getTracks().some((t) => t.id === track.id)) {
-            remoteStream.addTrack(track);
-            console.log("Añadiendo track remoto:", track.kind);
-          }
-        });
-        // Asignar srcObject solo si no está asignado
-        if (remoteVideoRef.current && !remoteVideoRef.current.srcObject) {
-          remoteVideoRef.current.srcObject = remoteStream;
-          const playPromise = remoteVideoRef.current.play();
-          if (playPromise !== undefined) {
-            playPromise
-              .then(() => {
-                console.log("Reproducción remota iniciada correctamente");
-              })
-              .catch((error) => {
-                console.error("Error al reproducir video remoto:", error);
-                if (error.name === "AbortError") {
-                  setTimeout(() => {
-                    if (remoteVideoRef.current && remoteVideoRef.current.srcObject) {
-                      remoteVideoRef.current.play().catch((e) => console.error("Reintento fallido:", e));
-                    }
-                  }, 500);
-                }
-              });
+      const pc = new RTCPeerConnection(RTC_CONFIG);
+      pcRef.current = pc;
+
+      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+
+      const remoteStream = new MediaStream();
+      remoteStreamRef.current = remoteStream;
+
+      // Manejar tracks sin reasignar srcObject innecesariamente
+      pc.ontrack = (event) => {
+        if (event.streams && event.streams[0]) {
+          event.streams[0].getTracks().forEach((track) => {
+            if (!remoteStream.getTracks().some((t) => t.id === track.id)) {
+              remoteStream.addTrack(track);
+              console.log("Añadiendo track remoto:", track.kind);
+            }
+          });
+          // Asignar srcObject solo si no está asignado
+          if (remoteVideoRef.current && !remoteVideoRef.current.srcObject) {
+            remoteVideoRef.current.srcObject = remoteStream;
+            const playPromise = remoteVideoRef.current.play();
+            if (playPromise !== undefined) {
+              playPromise
+                .then(() => {
+                  console.log("Reproducción remota iniciada correctamente");
+                })
+                .catch((error) => {
+                  console.error("Error al reproducir video remoto:", error);
+                  if (error.name === "AbortError") {
+                    setTimeout(() => {
+                      if (remoteVideoRef.current && remoteVideoRef.current.srcObject) {
+                        remoteVideoRef.current.play().catch((e) => console.error("Reintento fallido:", e));
+                      }
+                    }, 500);
+                  }
+                });
+            }
           }
         }
-      }
-    };
+      };
 
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        console.log("Enviando ICE candidate:", event.candidate);
-        socket.emit("webrtc_ice_candidate", {
-          to: selectedVetForCall,
-          from: user?.id || user?._id || user?.id_cliente || EMERGENCY_USER_ID,
-          candidate: event.candidate,
-        });
-      }
-    };
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          console.log("Enviando ICE candidate:", event.candidate);
+          socket.emit("webrtc_ice_candidate", {
+            to: selectedVetForCall,
+            from: user?.id || user?._id || user?.id_cliente || EMERGENCY_USER_ID,
+            candidate: event.candidate,
+          });
+        }
+      };
 
-    pc.oniceconnectionstatechange = () => {
-      console.log("ICE connection state:", pc.iceConnectionState);
-      if (pc.iceConnectionState === "disconnected" || pc.iceConnectionState === "failed") {
-        setCallStatus("error");
-        finalizarLlamada(false);
-      }
-    };
+      pc.oniceconnectionstatechange = () => {
+        console.log("ICE connection state:", pc.iceConnectionState);
+        if (pc.iceConnectionState === "disconnected" || pc.iceConnectionState === "failed") {
+          setCallStatus("error");
+          finalizarLlamada(false);
+        }
+      };
 
-    const offer = await pc.createOffer({
-      offerToReceiveAudio: true,
-      offerToReceiveVideo: true,
-    });
-    await pc.setLocalDescription(offer);
+      const offer = await pc.createOffer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: true,
+      });
+      await pc.setLocalDescription(offer);
 
-    socket.emit("iniciar_llamada", {
-      usuarioId: user?.id || user?._id || user?.id_cliente || EMERGENCY_USER_ID,
-      veterinarioId: selectedVetForCall,
-      motivo: "Emergencia",
-      extra: {
-        cliente_nombre: user ? user.nombre : guestName,
-        cliente_telefono: user ? user.telefono : guestPhone,
-      },
-    });
+      socket.emit("iniciar_llamada", {
+        usuarioId: user?.id || user?._id || user?.id_cliente || EMERGENCY_USER_ID,
+        veterinarioId: selectedVetForCall,
+        motivo: "Emergencia",
+        extra: {
+          cliente_nombre: user ? user.nombre : guestName,
+          cliente_telefono: user ? user.telefono : guestPhone,
+        },
+      });
 
-    socket.emit("webrtc_offer", {
-      to: selectedVetForCall,
-      from: user?.id || user?._id || user?.id_cliente || EMERGENCY_USER_ID,
-      sdp: pc.localDescription,
-    });
+      socket.emit("webrtc_offer", {
+        to: selectedVetForCall,
+        from: user?.id || user?._id || user?.id_cliente || EMERGENCY_USER_ID,
+        sdp: pc.localDescription,
+      });
 
-    setCallInProgress(true);
-    setCallStatus("esperando");
-  } catch (err) {
-    console.error("❌ Error al iniciar llamada:", err);
-    setCallStatus("error");
-    finalizarLlamada(false);
-    alert(`Error: ${err.message}`);
-  }
-};
+      setCallInProgress(true);
+      setCallStatus("esperando");
+    } catch (err) {
+      console.error("❌ Error al iniciar llamada:", err);
+      setCallStatus("error");
+      finalizarLlamada(false);
+      alert(`Error: ${err.message}`);
+    }
+  };
 
   // Finalizar llamada
   const finalizarLlamada = async (emitFinalize = true) => {
@@ -1589,8 +1584,7 @@ const iniciarLlamada = async () => {
                 </div>
                 <div className="position-absolute top-0 start-0 p-2">
                   <span
-                    className={`badge ${callStatus === "en_llamada" ? "bg-success" : "bg-primary"
-                      }`}
+                    className={`badge ${callStatus === "en_llamada" ? "bg-success" : "bg-primary"}`}
                   >
                     {callStatus === "esperando"
                       ? "Esperando respuesta..."

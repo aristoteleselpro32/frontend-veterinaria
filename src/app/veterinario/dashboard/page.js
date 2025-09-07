@@ -47,24 +47,23 @@ export default function VeterinarioDashboard() {
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
 
-  // Configuración ICE mejorada
+  // Configuración ICE con Xirsys
   const RTC_CONFIG = {
     iceServers: [
-      { urls: "stun:stun.l.google.com:19302" },
-      { urls: "stun:stun1.l.google.com:19302" },
-      { urls: "stun:stun2.l.google.com:19302" },
-      { urls: "stun:stun.relay.metered.ca:80" },
+      { urls: "stun:sp-turn1.xirsys.com" },
       {
-        urls: ["turn:openrelay.metered.ca:80", "turn:openrelay.metered.ca:443"],
-        username: "openrelayproject",
-        credential: "openrelayproject",
-      },
-      {
-        urls: "turn:turn.relay.metered.ca:443",
-        username: "openrelayproject",
-        credential: "openrelayproject",
-      },
-    ],
+        username: "_ee0X7Re6b3R-6JqKAJWd320SZoudP--4k4h7Bh-WBhXofeHVV1DxnAYmOc2wCyiAAAAAGi96FJtYXRlbw==",
+        credential: "a9a92c76-8c27-11f0-8830-0242ac120004",
+        urls: [
+          "turn:sp-turn1.xirsys.com:80?transport=udp",
+          "turn:sp-turn1.xirsys.com:3478?transport=udp",
+          "turn:sp-turn1.xirsys.com:80?transport=tcp",
+          "turn:sp-turn1.xirsys.com:3478?transport=tcp",
+          "turns:sp-turn1.xirsys.com:443?transport=tcp",
+          "turns:sp-turn1.xirsys.com:5349?transport=tcp"
+        ]
+      }
+    ]
   };
 
   // Cargar usuario al montar
