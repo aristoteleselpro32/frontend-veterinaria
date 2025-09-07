@@ -145,21 +145,18 @@ export default function VeterinarioDashboard() {
   useEffect(() => {
     const playVideo = async (videoRef, stream) => {
       if (videoRef.current && stream && stream.getTracks().length > 0) {
+        // Solo asignar srcObject si no está ya asignado
         if (!videoRef.current.srcObject) {
           videoRef.current.srcObject = stream;
         }
-        const playPromise = videoRef.current.play();
-        if (playPromise !== undefined) {
-          playPromise
-            .then(() => {
-              console.log("Reproducción iniciada correctamente:", stream.getTracks().map((t) => t.kind));
-            })
-            .catch((error) => {
-              console.error("Error al reproducir video:", error);
-              if (error.name === "AbortError") {
-                setTimeout(() => playVideo(videoRef, stream), 500); // Reintento después de 500ms
-              }
-            });
+        try {
+          await videoRef.current.play();
+          console.log("Reproducción iniciada correctamente:", stream.getTracks().map((t) => t.kind));
+        } catch (error) {
+          console.error("Error al reproducir video:", error);
+          if (error.name === "AbortError") {
+            setTimeout(() => playVideo(videoRef, stream), 500); // Reintento después de 500ms
+          }
         }
       }
     };
@@ -170,7 +167,7 @@ export default function VeterinarioDashboard() {
     if (callAccepted && remoteVideoRef.current && remoteStreamRef.current) {
       playVideo(remoteVideoRef, remoteStreamRef.current);
     }
-  }, [callAccepted]);
+  }, [callAccepted, localStreamRef.current, remoteStreamRef.current]);
 
   // Limpieza adicional al desmontar
   useEffect(() => {
@@ -182,6 +179,9 @@ export default function VeterinarioDashboard() {
 
   // Manejar llamada WebRTC entrante
   const handleIncomingWebRTCCall = async (from, offerSdp) => {
+    let retryCount = 0;
+    const maxRetries = 3;
+
     try {
       setCallStatus("connecting");
 
@@ -226,32 +226,48 @@ export default function VeterinarioDashboard() {
         if (event.streams && event.streams[0]) {
           if (!remoteStreamRef.current) {
             remoteStreamRef.current = new MediaStream();
-            if (remoteVideoRef.current && !remoteVideoRef.current.srcObject) {
-              remoteVideoRef.current.srcObject = remoteStreamRef.current;
-              remoteVideoRef.current
-                .play()
-                .catch((e) =>
-                  console.error("Error inicial al reproducir video remoto:", e)
-                );
-            }
           }
           event.streams[0].getTracks().forEach((track) => {
             console.log("Añadiendo track remoto:", track.kind);
             if (!remoteStreamRef.current.getTracks().some((t) => t.id === track.id)) {
               remoteStreamRef.current.addTrack(track);
-              if (remoteVideoRef.current && track.kind === "audio") {
-                remoteVideoRef.current
-                  .play()
-                  .catch((e) => console.error("Error al reproducir audio:", e));
-              }
             }
           });
+          // Asignar srcObject solo si no está asignado
+          if (remoteVideoRef.current && !remoteVideoRef.current.srcObject) {
+            remoteVideoRef.current.srcObject = remoteStreamRef.current;
+            const playPromise = remoteVideoRef.current.play();
+            if (playPromise !== undefined) {
+              playPromise
+                .then(() => {
+                  console.log("Reproducción remota iniciada correctamente");
+                })
+                .catch((error) => {
+                  console.error("Error al reproducir video remoto:", error);
+                  if (error.name === "AbortError") {
+                    setTimeout(() => {
+                      if (remoteVideoRef.current && remoteStreamRef.current) {
+                        remoteVideoRef.current.play().catch((e) => console.error("Reintento fallido:", e));
+                      }
+                    }, 500);
+                  }
+                });
+            }
+          }
         }
       };
 
       pc.oniceconnectionstatechange = () => {
         console.log("ICE connection state:", pc.iceConnectionState);
-        if (pc.iceConnectionState === "disconnected" || pc.iceConnectionState === "failed") {
+        if (pc.iceConnectionState === "disconnected" && retryCount < maxRetries) {
+          console.log(`Reintentando conexión (${retryCount + 1}/${maxRetries})...`);
+          retryCount++;
+          setTimeout(() => {
+            if (pcRef.current) {
+              pcRef.current.restartIce();
+            }
+          }, 1000);
+        } else if (pc.iceConnectionState === "disconnected" || pc.iceConnectionState === "failed") {
           setCallStatus("error");
           socketRef.current.emit("finalizar_llamada", {
             veterinarioId: user.id || user._id,

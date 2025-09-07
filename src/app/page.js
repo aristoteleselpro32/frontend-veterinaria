@@ -437,33 +437,33 @@ export default function Home() {
     };
   }, [user]);
 
-  useEffect(() => {
-    const playVideo = async (videoRef, stream) => {
-      if (videoRef.current && stream && stream.getTracks().length > 0) {
+useEffect(() => {
+  const playVideo = async (videoRef, stream) => {
+    if (videoRef.current && stream && stream.getTracks().length > 0) {
+      // Solo asignar srcObject si no está ya asignado
+      if (!videoRef.current.srcObject) {
         videoRef.current.srcObject = stream;
-        const playPromise = videoRef.current.play();
-        if (playPromise !== undefined) {
-          playPromise
-            .then(() => {
-              console.log("Reproducción iniciada correctamente");
-            })
-            .catch((error) => {
-              console.error("Error al reproducir video:", error);
-              if (error.name === "AbortError") {
-                setTimeout(() => playVideo(videoRef, stream), 500);
-              }
-            });
+      }
+      try {
+        await videoRef.current.play();
+        console.log("Reproducción iniciada correctamente");
+      } catch (error) {
+        console.error("Error al reproducir video:", error);
+        if (error.name === "AbortError") {
+          // Reintentar después de 500ms
+          setTimeout(() => playVideo(videoRef, stream), 500);
         }
       }
-    };
+    }
+  };
 
-    if (callInProgress && localVideoRef.current && localStreamRef.current) {
-      playVideo(localVideoRef, localStreamRef.current);
-    }
-    if (callInProgress && remoteVideoRef.current && remoteStreamRef.current) {
-      playVideo(remoteVideoRef, remoteStreamRef.current);
-    }
-  }, [callInProgress, localStreamRef.current, remoteStreamRef.current]);
+  if (callInProgress && localVideoRef.current && localStreamRef.current) {
+    playVideo(localVideoRef, localStreamRef.current);
+  }
+  if (callInProgress && remoteVideoRef.current && remoteStreamRef.current) {
+    playVideo(remoteVideoRef, remoteStreamRef.current);
+  }
+}, [callInProgress, localStreamRef.current, remoteStreamRef.current]);
 
   // Limpieza al desmontar
   useEffect(() => {
@@ -662,19 +662,23 @@ export default function Home() {
     askAndLoadCameras();
   };
 
-  // Iniciar videollamada
-  const iniciarLlamada = async () => {
-    if (!socket) return alert("Socket no conectado");
-    if (!selectedVetForCall) return alert("Selecciona un veterinario para la llamada.");
+// Iniciar videollamada
+const iniciarLlamada = async () => {
+  if (!socket) return alert("Socket no conectado");
+  if (!selectedVetForCall) return alert("Selecciona un veterinario para la llamada.");
 
-    if (!user) {
-      setGuestError("");
-      if (!guestName || !guestPhone) {
-        setShowGuestModal(true);
-        return;
-      }
+  if (!user) {
+    setGuestError("");
+    if (!guestName || !guestPhone) {
+      setShowGuestModal(true);
+      return;
     }
+  }
 
+  let retryCount = 0;
+  const maxRetries = 3;
+
+  const attemptConnection = async () => {
     try {
       setCallStatus("conectando");
       setQueuePosition(null);
@@ -709,7 +713,6 @@ export default function Home() {
       const remoteStream = new MediaStream();
       remoteStreamRef.current = remoteStream;
 
-      // Manejar tracks sin reasignar srcObject innecesariamente
       pc.ontrack = (event) => {
         if (event.streams && event.streams[0]) {
           event.streams[0].getTracks().forEach((track) => {
@@ -731,7 +734,7 @@ export default function Home() {
                   console.error("Error al reproducir video remoto:", error);
                   if (error.name === "AbortError") {
                     setTimeout(() => {
-                      if (remoteVideoRef.current && remoteVideoRef.current.srcObject) {
+                      if (remoteVideoRef.current && remoteStreamRef.current) {
                         remoteVideoRef.current.play().catch((e) => console.error("Reintento fallido:", e));
                       }
                     }, 500);
@@ -755,7 +758,15 @@ export default function Home() {
 
       pc.oniceconnectionstatechange = () => {
         console.log("ICE connection state:", pc.iceConnectionState);
-        if (pc.iceConnectionState === "disconnected" || pc.iceConnectionState === "failed") {
+        if (pc.iceConnectionState === "disconnected" && retryCount < maxRetries) {
+          console.log(`Reintentando conexión (${retryCount + 1}/${maxRetries})...`);
+          retryCount++;
+          setTimeout(() => {
+            if (pcRef.current) {
+              pcRef.current.restartIce();
+            }
+          }, 1000);
+        } else if (pc.iceConnectionState === "disconnected" || pc.iceConnectionState === "failed") {
           setCallStatus("error");
           finalizarLlamada(false);
         }
