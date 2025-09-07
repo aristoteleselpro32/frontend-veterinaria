@@ -690,59 +690,53 @@ const iniciarLlamada = async () => {
         height: { ideal: 720 },
         ...(selectedCameraId ? { deviceId: { exact: selectedCameraId } } : { facingMode: "user" }),
       },
-      audio: true,
+      audio: selectedMicrophoneId ? { deviceId: { exact: selectedMicrophoneId } } : true,
     };
 
     const stream = await navigator.mediaDevices.getUserMedia(constraints).catch((err) => {
       console.error("Error al acceder a medios:", err);
       if (err.name === "NotAllowedError") {
-        throw new Error("Permisos de cámara o micrófono denegados. Por favor, concede los permisos.");
+        throw new Error("Permisos de cámara o micrófono denegados. Por favor, concede los permisos en tu navegador.");
       } else if (err.name === "NotFoundError") {
-        throw new Error("No se encontraron dispositivos de cámara o micrófono.");
+        throw new Error("No se encontraron dispositivos de cámara o micrófono. Verifica que estén conectados.");
       } else {
-        throw new Error("No se pudo acceder a la cámara o micrófono: " + err.message);
+        throw new Error("Error al acceder a la cámara o micrófono: " + err.message);
       }
     });
 
     localStreamRef.current = stream;
+    const audioTracks = stream.getAudioTracks();
+    if (audioTracks.length === 0) {
+      console.warn("No se encontraron pistas de audio en el flujo.");
+      alert("No se detectó audio. Verifica tu micrófono.");
+    } else {
+      console.log("Pistas de audio locales:", audioTracks);
+    }
 
     const pc = new RTCPeerConnection(RTC_CONFIG);
     pcRef.current = pc;
 
-    stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+    stream.getTracks().forEach((track) => {
+      console.log("Añadiendo pista:", track.kind, track.id);
+      pc.addTrack(track, stream);
+    });
 
     const remoteStream = new MediaStream();
     remoteStreamRef.current = remoteStream;
 
-    // Manejar tracks sin reasignar srcObject innecesariamente
     pc.ontrack = (event) => {
+      console.log("Pista remota recibida:", event.track.kind, event.track.id);
       if (event.streams && event.streams[0]) {
         event.streams[0].getTracks().forEach((track) => {
           if (!remoteStream.getTracks().some((t) => t.id === track.id)) {
             remoteStream.addTrack(track);
-            console.log("Añadiendo track remoto:", track.kind);
+            console.log("Añadiendo pista remota:", track.kind);
           }
         });
-        // Asignar srcObject solo si no está asignado
         if (remoteVideoRef.current && !remoteVideoRef.current.srcObject) {
           remoteVideoRef.current.srcObject = remoteStream;
-          const playPromise = remoteVideoRef.current.play();
-          if (playPromise !== undefined) {
-            playPromise
-              .then(() => {
-                console.log("Reproducción remota iniciada correctamente");
-              })
-              .catch((error) => {
-                console.error("Error al reproducir video remoto:", error);
-                if (error.name === "AbortError") {
-                  setTimeout(() => {
-                    if (remoteVideoRef.current && remoteVideoRef.current.srcObject) {
-                      remoteVideoRef.current.play().catch((e) => console.error("Reintento fallido:", e));
-                    }
-                  }, 500);
-                }
-              });
-          }
+          remoteVideoRef.current.muted = false; // Asegúrate de que no esté silenciado
+          remoteVideoRef.current.play().catch((e) => console.error("Error al reproducir video remoto:", e));
         }
       }
     };
