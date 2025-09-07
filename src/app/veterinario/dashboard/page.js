@@ -1,4 +1,3 @@
-
 "use client";
 import { useState, useEffect, useRef } from "react";
 import Agenda from "./agenda";
@@ -46,7 +45,15 @@ export default function VeterinarioDashboard() {
       { urls: "stun:stun2.l.google.com:19302" },
       { urls: "stun:stun.relay.metered.ca:80" },
       {
-        urls: "turn:openrelay.metered.ca:80",
+        urls: [
+          "turn:openrelay.metered.ca:80",
+          "turn:openrelay.metered.ca:443", // Puerto seguro
+        ],
+        username: "openrelayproject",
+        credential: "openrelayproject",
+      },
+      {
+        urls: "turn:turn.relay.metered.ca:443", // Servidor TURN adicional
         username: "openrelayproject",
         credential: "openrelayproject",
       },
@@ -128,23 +135,25 @@ export default function VeterinarioDashboard() {
     };
   }, [user]);
 
-  // Asigna streams a videos después de renderizar la vista de llamada
+  // Asigna streams a videos y activa audio
   useEffect(() => {
-    if (callAccepted && localVideoRef.current && localStreamRef.current) {
-      localVideoRef.current.srcObject = localStreamRef.current;
-      if (localStreamRef.current.getTracks().length > 0) {
-        localVideoRef.current.play().catch((e) => console.error("Error reproduciendo video local:", e));
-      } else {
-        console.warn("No hay tracks locales aún, esperando...");
+    const playVideo = async (videoRef, stream) => {
+      if (videoRef.current && stream && stream.getTracks().length > 0) {
+        videoRef.current.srcObject = stream;
+        try {
+          await videoRef.current.play();
+          console.log("Reproduciendo stream:", stream.getTracks().map((t) => t.kind));
+        } catch (e) {
+          console.error("Error reproduciendo video:", e);
+        }
       }
+    };
+
+    if (callAccepted && localVideoRef.current && localStreamRef.current) {
+      playVideo(localVideoRef, localStreamRef.current);
     }
     if (callAccepted && remoteVideoRef.current && remoteStreamRef.current) {
-      remoteVideoRef.current.srcObject = remoteStreamRef.current;
-      if (remoteStreamRef.current.getTracks().length > 0) {
-        remoteVideoRef.current.play().catch((e) => console.error("Error reproduciendo video remoto:", e));
-      } else {
-        console.warn("No hay tracks remotos aún, esperando...");
-      }
+      playVideo(remoteVideoRef, remoteStreamRef.current);
     }
   }, [callAccepted]);
 
@@ -174,7 +183,13 @@ export default function VeterinarioDashboard() {
         .getUserMedia(constraints)
         .catch((err) => {
           console.error("Error al acceder a medios:", err);
-          throw new Error("No se pudo acceder a la cámara/micrófono");
+          if (err.name === "NotAllowedError") {
+            throw new Error("Permisos de micrófono o cámara denegados. Concede los permisos.");
+          } else if (err.name === "NotFoundError") {
+            throw new Error("No se encontraron dispositivos de audio o video.");
+          } else {
+            throw new Error("No se pudo acceder a los medios: " + err.message);
+          }
         });
 
       localStreamRef.current = localStream;
@@ -197,16 +212,18 @@ export default function VeterinarioDashboard() {
           remoteStreamRef.current = new MediaStream();
         }
         event.streams[0].getTracks().forEach((track) => {
-          remoteStreamRef.current.addTrack(track);
+          console.log("Añadiendo track remoto:", track.kind);
+          if (!remoteStreamRef.current.getTracks().some((t) => t.id === track.id)) {
+            remoteStreamRef.current.addTrack(track);
+            if (track.kind === "audio" && remoteVideoRef.current) {
+              remoteVideoRef.current.play().catch((e) => console.error("Error al reproducir audio:", e));
+            }
+          }
         });
-
-        console.log("Track remoto añadido:", track.kind);
-        if (remoteVideoRef.current) {
-          remoteVideoRef.current.play().catch((e) => console.error("Retry play:", e));
-        }
       };
 
       localStream.getTracks().forEach((track) => {
+        console.log("Añadiendo track local:", track.kind);
         pc.addTrack(track, localStream);
       });
 
