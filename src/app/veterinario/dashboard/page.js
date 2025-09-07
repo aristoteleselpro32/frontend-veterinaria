@@ -22,6 +22,23 @@ import { FaBell, FaUserCircle, FaPhone, FaPhoneSlash } from "react-icons/fa";
 import Cookies from "js-cookie";
 import { io } from "socket.io-client";
 
+// Función auxiliar para reproducción segura de video
+const safePlay = async (videoElement) => {
+  if (!videoElement) return;
+  
+  try {
+    const playPromise = videoElement.play();
+    if (playPromise !== undefined) {
+      await playPromise;
+    }
+  } catch (error) {
+    // Ignorar AbortError ya que es común en WebRTC
+    if (error.name !== 'AbortError') {
+      console.warn("Error en safePlay:", error);
+    }
+  }
+};
+
 export default function VeterinarioDashboard() {
   const [view, setView] = useState("agenda");
   const [user, setUser] = useState(null);
@@ -38,6 +55,8 @@ export default function VeterinarioDashboard() {
   const [waitingForOffer, setWaitingForOffer] = useState(false);
   const [showEndCallModal, setShowEndCallModal] = useState(false);
   const [endCallForm, setEndCallForm] = useState({ precio: "", motivo: "emergencia" });
+  const [localVideoReady, setLocalVideoReady] = useState(false);
+  const [remoteVideoReady, setRemoteVideoReady] = useState(false);
 
   // Refs para WebRTC
   const socketRef = useRef(null);
@@ -141,39 +160,39 @@ export default function VeterinarioDashboard() {
     };
   }, [user]);
 
-  // Asigna streams a videos y activa audio
+  // Reproducción de video mejorada
   useEffect(() => {
-    const playVideo = async (videoRef, stream) => {
-      if (videoRef.current && stream && stream.getTracks().length > 0) {
-        // Solo asignar srcObject si no está ya asignado
-        if (!videoRef.current.srcObject) {
-          videoRef.current.srcObject = stream;
-        }
-        try {
-          await videoRef.current.play();
-          console.log("Reproducción iniciada correctamente:", stream.getTracks().map((t) => t.kind));
-        } catch (error) {
-          console.error("Error al reproducir video:", error);
-          if (error.name === "AbortError") {
-            setTimeout(() => playVideo(videoRef, stream), 500); // Reintento después de 500ms
+    const handleVideoPlayback = async () => {
+      if (callAccepted) {
+        // Pequeño delay para asegurar que los elementos estén listos
+        setTimeout(() => {
+          if (localVideoRef.current && localStreamRef.current) {
+            localVideoRef.current.srcObject = localStreamRef.current;
+            safePlay(localVideoRef.current);
           }
-        }
+          
+          if (remoteVideoRef.current && remoteStreamRef.current) {
+            remoteVideoRef.current.srcObject = remoteStreamRef.current;
+            safePlay(remoteVideoRef.current);
+          }
+        }, 500);
       }
     };
 
-    if (callAccepted && localVideoRef.current && localStreamRef.current) {
-      playVideo(localVideoRef, localStreamRef.current);
-    }
-    if (callAccepted && remoteVideoRef.current && remoteStreamRef.current) {
-      playVideo(remoteVideoRef, remoteStreamRef.current);
-    }
-  }, [callAccepted, localStreamRef.current, remoteStreamRef.current]);
+    handleVideoPlayback();
+  }, [callAccepted, localVideoReady, remoteVideoReady]);
 
   // Limpieza adicional al desmontar
   useEffect(() => {
     return () => {
-      if (localVideoRef.current) localVideoRef.current.srcObject = null;
-      if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = null;
+        localVideoRef.current.pause();
+      }
+      if (remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = null;
+        remoteVideoRef.current.pause();
+      }
     };
   }, []);
 
@@ -222,38 +241,42 @@ export default function VeterinarioDashboard() {
         }
       };
 
+      // Manejo mejorado de tracks remotos
       pc.ontrack = (event) => {
+        console.log("📹 Track remoto recibido:", event.track.kind);
+        
         if (event.streams && event.streams[0]) {
-          if (!remoteStreamRef.current) {
-            remoteStreamRef.current = new MediaStream();
+          const incomingStream = event.streams[0];
+          
+          // Limpiar tracks antiguos primero
+          if (remoteStreamRef.current) {
+            remoteStreamRef.current.getTracks().forEach(track => track.stop());
           }
-          event.streams[0].getTracks().forEach((track) => {
-            console.log("Añadiendo track remoto:", track.kind);
-            if (!remoteStreamRef.current.getTracks().some((t) => t.id === track.id)) {
-              remoteStreamRef.current.addTrack(track);
+          
+          remoteStreamRef.current = incomingStream;
+          
+          // Reproducir después de un pequeño delay para evitar conflictos
+          setTimeout(() => {
+            if (remoteVideoRef.current) {
+              remoteVideoRef.current.srcObject = null;
+              remoteVideoRef.current.srcObject = incomingStream;
+              
+              const playPromise = remoteVideoRef.current.play();
+              if (playPromise !== undefined) {
+                playPromise
+                  .then(() => {
+                    console.log("✅ Video remoto reproduciéndose");
+                  })
+                  .catch(error => {
+                    console.warn("⚠️ Error en play promise:", error);
+                    // Silenciar el error de AbortError ya que es común en WebRTC
+                    if (error.name !== 'AbortError') {
+                      console.error("Error al reproducir video remoto:", error);
+                    }
+                  });
+              }
             }
-          });
-          // Asignar srcObject solo si no está asignado
-          if (remoteVideoRef.current && !remoteVideoRef.current.srcObject) {
-            remoteVideoRef.current.srcObject = remoteStreamRef.current;
-            const playPromise = remoteVideoRef.current.play();
-            if (playPromise !== undefined) {
-              playPromise
-                .then(() => {
-                  console.log("Reproducción remota iniciada correctamente");
-                })
-                .catch((error) => {
-                  console.error("Error al reproducir video remoto:", error);
-                  if (error.name === "AbortError") {
-                    setTimeout(() => {
-                      if (remoteVideoRef.current && remoteStreamRef.current) {
-                        remoteVideoRef.current.play().catch((e) => console.error("Reintento fallido:", e));
-                      }
-                    }, 500);
-                  }
-                });
-            }
-          }
+          }, 100);
         }
       };
 
@@ -383,26 +406,46 @@ export default function VeterinarioDashboard() {
       });
     }
 
-    if (pcRef.current) {
-      pcRef.current.getSenders().forEach((sender) => {
-        sender.track?.stop();
-      });
-      pcRef.current.close();
-      pcRef.current = null;
-    }
-
+    // Detener todos los tracks de medios
     if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach((track) => track.stop());
+      localStreamRef.current.getTracks().forEach(track => {
+        track.stop();
+        track.enabled = false;
+      });
       localStreamRef.current = null;
     }
 
     if (remoteStreamRef.current) {
-      remoteStreamRef.current.getTracks().forEach((track) => track.stop());
+      remoteStreamRef.current.getTracks().forEach(track => {
+        track.stop();
+        track.enabled = false;
+      });
       remoteStreamRef.current = null;
     }
 
-    if (localVideoRef.current) localVideoRef.current.srcObject = null;
-    if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
+    // Limpiar referencias de video
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = null;
+      localVideoRef.current.pause();
+    }
+
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = null;
+      remoteVideoRef.current.pause();
+    }
+
+    // Cerrar conexión PeerConnection
+    if (pcRef.current) {
+      try {
+        pcRef.current.getSenders().forEach(sender => {
+          if (sender.track) sender.track.stop();
+        });
+        pcRef.current.close();
+      } catch (e) {
+        console.error("Error al cerrar peer connection:", e);
+      }
+      pcRef.current = null;
+    }
 
     setCallAccepted(false);
     setIncomingCall(null);
@@ -412,6 +455,8 @@ export default function VeterinarioDashboard() {
     setShowCallModal(false);
     setWaitingForOffer(false);
     setEndCallForm({ precio: "50", motivo: "emergencia" });
+    setLocalVideoReady(false);
+    setRemoteVideoReady(false);
   };
 
   // Cerrar sesión
@@ -694,6 +739,8 @@ export default function VeterinarioDashboard() {
                 height: "100%",
                 objectFit: "cover",
               }}
+              onLoadedMetadata={() => setRemoteVideoReady(true)}
+              onCanPlay={() => safePlay(remoteVideoRef.current)}
             />
           </div>
 
@@ -737,6 +784,8 @@ export default function VeterinarioDashboard() {
                 objectFit: "cover",
                 transform: "scaleX(-1)",
               }}
+              onLoadedMetadata={() => setLocalVideoReady(true)}
+              onCanPlay={() => safePlay(localVideoRef.current)}
             />
           </div>
 

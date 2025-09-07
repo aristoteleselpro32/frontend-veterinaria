@@ -1,4 +1,3 @@
-
 "use client";
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
@@ -168,6 +167,23 @@ const styles = `
   }
 `;
 
+// Función auxiliar para reproducción segura de video
+const safePlay = async (videoElement) => {
+  if (!videoElement) return;
+  
+  try {
+    const playPromise = videoElement.play();
+    if (playPromise !== undefined) {
+      await playPromise;
+    }
+  } catch (error) {
+    // Ignorar AbortError ya que es común en WebRTC
+    if (error.name !== 'AbortError') {
+      console.warn("Error en safePlay:", error);
+    }
+  }
+};
+
 export default function Home() {
   const [user, setUser] = useState(null);
   const [showLoginPrompt, setShowLoginPrompt] = useState(false);
@@ -207,6 +223,8 @@ export default function Home() {
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const [theme, setTheme] = useState("dark");
+  const [localVideoReady, setLocalVideoReady] = useState(false);
+  const [remoteVideoReady, setRemoteVideoReady] = useState(false);
 
   // Inicializar AOS y detectar tema
   useEffect(() => {
@@ -439,43 +457,39 @@ export default function Home() {
     };
   }, [user]);
 
-  // Reproducción de video
+  // Reproducción de video mejorada
   useEffect(() => {
-    const playVideo = async (videoRef, stream) => {
-      if (videoRef.current && stream && stream.getTracks().length > 0) {
-        if (!videoRef.current.srcObject) {
-          videoRef.current.srcObject = stream;
-          try {
-            await videoRef.current.play();
-            console.log("Reproducción iniciada correctamente:", stream.getTracks().map((t) => t.kind));
-          } catch (error) {
-            console.error("Error al reproducir video:", error);
-            if (error.name === "AbortError") {
-              setTimeout(() => {
-                if (videoRef.current && stream && !videoRef.current.srcObject) {
-                  videoRef.current.srcObject = stream;
-                  videoRef.current.play().catch((e) => console.error("Reintento fallido:", e));
-                }
-              }, 500);
-            }
+    const handleVideoPlayback = async () => {
+      if (callInProgress) {
+        // Pequeño delay para asegurar que los elementos estén listos
+        setTimeout(() => {
+          if (localVideoRef.current && localStreamRef.current) {
+            localVideoRef.current.srcObject = localStreamRef.current;
+            safePlay(localVideoRef.current);
           }
-        }
+          
+          if (remoteVideoRef.current && remoteStreamRef.current) {
+            remoteVideoRef.current.srcObject = remoteStreamRef.current;
+            safePlay(remoteVideoRef.current);
+          }
+        }, 500);
       }
     };
 
-    if (callInProgress && localVideoRef.current && localStreamRef.current) {
-      playVideo(localVideoRef, localStreamRef.current);
-    }
-    if (callInProgress && remoteVideoRef.current && remoteStreamRef.current) {
-      playVideo(remoteVideoRef, remoteStreamRef.current);
-    }
-  }, [callInProgress]);
+    handleVideoPlayback();
+  }, [callInProgress, localVideoReady, remoteVideoReady]);
 
   // Limpieza al desmontar
   useEffect(() => {
     return () => {
-      if (localVideoRef.current) localVideoRef.current.srcObject = null;
-      if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = null;
+        localVideoRef.current.pause();
+      }
+      if (remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = null;
+        remoteVideoRef.current.pause();
+      }
     };
   }, []);
 
@@ -574,7 +588,6 @@ export default function Home() {
       if (!isValidDate(fechaHora)) {
         setReservaError("⚠️ La fecha u hora ingresada no es válida.");
         setLoadingReservaSubmit(false);
-        return;
       }
     } catch (err) {
       setReservaError("⚠️ Error al procesar la fecha y hora.");
@@ -730,35 +743,42 @@ export default function Home() {
         const remoteStream = new MediaStream();
         remoteStreamRef.current = remoteStream;
 
+        // Manejo mejorado de tracks remotos
         pc.ontrack = (event) => {
+          console.log("📹 Track remoto recibido:", event.track.kind);
+          
           if (event.streams && event.streams[0]) {
-            event.streams[0].getTracks().forEach((track) => {
-              if (!remoteStream.getTracks().some((t) => t.id === track.id)) {
-                remoteStream.addTrack(track);
-                console.log("Añadiendo track remoto:", track.kind);
-              }
-            });
-            if (remoteVideoRef.current && !remoteVideoRef.current.srcObject) {
-              remoteVideoRef.current.srcObject = remoteStream;
-              const playPromise = remoteVideoRef.current.play();
-              if (playPromise !== undefined) {
-                playPromise
-                  .then(() => {
-                    console.log("Reproducción remota iniciada correctamente");
-                  })
-                  .catch((error) => {
-                    console.error("Error al reproducir video remoto:", error);
-                    if (error.name === "AbortError") {
-                      setTimeout(() => {
-                        if (remoteVideoRef.current && remoteStream) {
-                          remoteVideoRef.current.srcObject = remoteStream;
-                          remoteVideoRef.current.play().catch((e) => console.error("Reintento fallido:", e));
-                        }
-                      }, 500);
-                    }
-                  });
-              }
+            const incomingStream = event.streams[0];
+            
+            // Limpiar tracks antiguos primero
+            if (remoteStreamRef.current) {
+              remoteStreamRef.current.getTracks().forEach(track => track.stop());
             }
+            
+            remoteStreamRef.current = incomingStream;
+            
+            // Reproducir después de un pequeño delay para evitar conflictos
+            setTimeout(() => {
+              if (remoteVideoRef.current) {
+                remoteVideoRef.current.srcObject = null;
+                remoteVideoRef.current.srcObject = incomingStream;
+                
+                const playPromise = remoteVideoRef.current.play();
+                if (playPromise !== undefined) {
+                  playPromise
+                    .then(() => {
+                      console.log("✅ Video remoto reproduciéndose");
+                    })
+                    .catch(error => {
+                      console.warn("⚠️ Error en play promise:", error);
+                      // Silenciar el error de AbortError ya que es común en WebRTC
+                      if (error.name !== 'AbortError') {
+                        console.error("Error al reproducir video remoto:", error);
+                      }
+                    });
+                }
+              }
+            }, 100);
           }
         };
 
@@ -845,9 +865,38 @@ export default function Home() {
       console.warn("Error al emitir finalización:", e);
     }
 
+    // Detener todos los tracks de medios
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => {
+        track.stop();
+        track.enabled = false;
+      });
+      localStreamRef.current = null;
+    }
+
+    if (remoteStreamRef.current) {
+      remoteStreamRef.current.getTracks().forEach(track => {
+        track.stop();
+        track.enabled = false;
+      });
+      remoteStreamRef.current = null;
+    }
+
+    // Limpiar referencias de video
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = null;
+      localVideoRef.current.pause();
+    }
+
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = null;
+      remoteVideoRef.current.pause();
+    }
+
+    // Cerrar conexión PeerConnection
     if (pcRef.current) {
       try {
-        pcRef.current.getSenders().forEach((sender) => {
+        pcRef.current.getSenders().forEach(sender => {
           if (sender.track) sender.track.stop();
         });
         pcRef.current.close();
@@ -857,19 +906,6 @@ export default function Home() {
       pcRef.current = null;
     }
 
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach((track) => track.stop());
-      localStreamRef.current = null;
-    }
-
-    if (remoteStreamRef.current) {
-      remoteStreamRef.current.getTracks().forEach((track) => track.stop());
-      remoteStreamRef.current = null;
-    }
-
-    if (localVideoRef.current) localVideoRef.current.srcObject = null;
-    if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
-
     setCallInProgress(false);
     setCallStatus("");
     setQueuePosition(null);
@@ -877,6 +913,8 @@ export default function Home() {
     setShowGuestModal(false);
     setGuestName("");
     setGuestPhone("");
+    setLocalVideoReady(false);
+    setRemoteVideoReady(false);
   };
 
   // Render
@@ -1606,6 +1644,8 @@ export default function Home() {
                     borderRadius: "12px",
                     objectFit: "cover",
                   }}
+                  onLoadedMetadata={() => setRemoteVideoReady(true)}
+                  onCanPlay={() => safePlay(remoteVideoRef.current)}
                 />
                 <div
                   style={{
@@ -1631,6 +1671,8 @@ export default function Home() {
                       transform: "scaleX(-1)",
                       objectFit: "cover",
                     }}
+                    onLoadedMetadata={() => setLocalVideoReady(true)}
+                    onCanPlay={() => safePlay(localVideoRef.current)}
                   />
                 </div>
                 <div className="position-absolute top-0 start-0 p-2">
