@@ -1,4 +1,3 @@
-
 "use client";
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
@@ -34,7 +33,15 @@ const RTC_CONFIG = {
     { urls: "stun:stun2.l.google.com:19302" },
     { urls: "stun:stun.relay.metered.ca:80" },
     {
-      urls: "turn:openrelay.metered.ca:80",
+      urls: [
+        "turn:openrelay.metered.ca:80",
+        "turn:openrelay.metered.ca:443", // Agregar puerto seguro
+      ],
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
+    {
+      urls: "turn:turn.relay.metered.ca:443", // Servidor TURN adicional
       username: "openrelayproject",
       credential: "openrelayproject",
     },
@@ -436,19 +443,24 @@ export default function Home() {
 
   // Asignar streams a los videos
   useEffect(() => {
-    if (callInProgress && localVideoRef.current && localStreamRef.current) {
-      localVideoRef.current.srcObject = localStreamRef.current;
-      if (localStreamRef.current.getTracks().length > 0) {
-        localVideoRef.current.play().catch((e) => console.error("Error reproduciendo video local:", e));
+    const playVideo = async (videoRef, stream) => {
+      if (videoRef.current && stream && stream.getTracks().length > 0) {
+        videoRef.current.srcObject = stream;
+        try {
+          await videoRef.current.play();
+        } catch (e) {
+          console.error("Error reproduciendo video:", e);
+        }
       }
+    };
+
+    if (callInProgress && localVideoRef.current && localStreamRef.current) {
+      playVideo(localVideoRef, localStreamRef.current);
     }
     if (callInProgress && remoteVideoRef.current && remoteStreamRef.current) {
-      remoteVideoRef.current.srcObject = remoteStreamRef.current;
-      if (remoteStreamRef.current.getTracks().length > 0) {
-        remoteVideoRef.current.play().catch((e) => console.error("Error reproduciendo video remoto:", e));
-      }
+      playVideo(remoteVideoRef, remoteVideoRef.current);
     }
-  }, [callInProgress]);
+  }, [callInProgress, localStreamRef.current, remoteStreamRef.current]);
 
   // Limpieza al desmontar
   useEffect(() => {
@@ -670,12 +682,18 @@ export default function Home() {
           height: { ideal: 720 },
           ...(selectedCameraId ? { deviceId: { exact: selectedCameraId } } : { facingMode: "user" }),
         },
-        audio: false,
+        audio: true, // Habilitar audio
       };
 
       const stream = await navigator.mediaDevices.getUserMedia(constraints).catch((err) => {
         console.error("Error al acceder a medios:", err);
-        throw new Error("No se pudo acceder a la cámara. Verifica permisos.");
+        if (err.name === "NotAllowedError") {
+          throw new Error("Permisos de cámara o micrófono denegados. Por favor, concede los permisos.");
+        } else if (err.name === "NotFoundError") {
+          throw new Error("No se encontraron dispositivos de cámara o micrófono.");
+        } else {
+          throw new Error("No se pudo acceder a la cámara o micrófono: " + err.message);
+        }
       });
 
       localStreamRef.current = stream;
@@ -696,13 +714,15 @@ export default function Home() {
             }
           });
           if (remoteVideoRef.current) {
-            remoteVideoRef.current.play().catch((e) => console.error("Retry play:", e));
+            remoteVideoRef.current.srcObject = remoteStream;
+            remoteVideoRef.current.play().catch((e) => console.error("Error reproduciendo video remoto:", e));
           }
         }
       };
 
       pc.onicecandidate = (event) => {
         if (event.candidate) {
+          console.log("Enviando ICE candidate:", event.candidate);
           socket.emit("webrtc_ice_candidate", {
             to: selectedVetForCall,
             from: user?.id || user?._id || user?.id_cliente || EMERGENCY_USER_ID,
@@ -811,14 +831,6 @@ export default function Home() {
         <div style={{ color: "#e5e7eb", fontSize: "clamp(0.8rem, 3vw, 0.9rem)" }}>
           Horario: Lun-Vie 7:00 AM - 21:00 PM
         </div>
-        <Nav>
-          <Nav.Link href="#" style={{ color: "#e5e7eb" }}>
-            Facebook
-          </Nav.Link>
-          <Nav.Link href="#" style={{ color: "#e5e7eb" }}>
-            Instagram
-          </Nav.Link>
-        </Nav>
         <div>
           {!user ? (
             <>
